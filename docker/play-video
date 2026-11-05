@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Play completed experiment videos without using the models' CUDA device.
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd -- "$script_dir/.." && pwd)"
+player_root="$project_root/.apexnav-tools/mpv/root"
+player="$player_root/usr/bin/mpv"
+
+if [[ ! -x "$player" ]]; then
+    printf '%s\n' "Local mpv not found: $player" >&2
+    printf '%s\n' 'See docker/experiment_commands.zh-CN.md for the system-install alternative.' >&2
+    exit 1
+fi
+
+screenshots="$project_root/experiment_notes/screenshots"
+mkdir -p "$screenshots"
+exec env LD_LIBRARY_PATH="$player_root/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$player" --no-config --hwdec=no --vo=x11 --vd-lavc-threads=2 \
+    --cache=no --demuxer-max-bytes=8MiB --demuxer-max-back-bytes=0 \
+    --no-audio --screenshot-directory="$screenshots" "$@"

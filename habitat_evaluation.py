@@ -30,6 +30,7 @@ import json
 import os
 import signal
 import time
+import traceback
 from copy import deepcopy
 
 # Third-party library imports
@@ -55,7 +56,6 @@ from habitat.config.default_structured_configs import (
 )
 from habitat.sims.habitat_simulator.actions import HabitatSimActions
 from habitat.utils.visualizations.utils import (
-    images_to_video,
     observations_to_image,
     overlay_frame,
 )
@@ -71,10 +71,13 @@ from basic_utils.object_point_cloud_utils.object_point_cloud import (
 )
 from basic_utils.record_episode.read_record import read_record
 from basic_utils.record_episode.write_record import write_record
+from basic_utils.record_episode.experiment import (
+    EpisodeVideo, episode_plan, resume_state, save_result,
+)
 from habitat2ros.habitat_publisher import ROSPublisherNonNode
 from llm.answer_reader.answer_reader import read_answer
 from params import HABITAT_STATE, ROS_STATE, ACTION, RESULT_TYPES
-from vlm.Labels import MP3D_ID_TO_NAME
+from vlm.Labels import detector_category
 from vlm.utils.get_itm_message import get_itm_message_cosine
 from vlm.utils.get_object_utils import get_object
 
@@ -210,17 +213,6 @@ def _parse_dataset_arg():
 
 
 def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> None:
-    # Load MP3D validation data for object category mapping
-    with gzip.open(
-        "data/datasets/objectnav/mp3d/v1/val/val.json.gz", "rt", encoding="utf-8"
-    ) as f:
-        val_data = json.load(f)
-    category_to_coco = val_data.get("category_to_mp3d_category_id", {})
-    id_to_name = {
-        category_to_coco[cat]: MP3D_ID_TO_NAME[idx]
-        for idx, cat in enumerate(category_to_coco)
-    }
-
     start_time = time.time()
 
     node.final_state = 0
@@ -278,8 +270,13 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
     env = habitat.Env(cfg)
     print("Environment creation successful")
     number_of_episodes = env.number_of_episodes
+    max_episodes = int(cfg.get("max_episodes", -1))
 
     # Read previous records and set initial values
+    saved_state = None if flag_once else resume_state(video_output_path)
+    state = saved_state if saved_state is not None else read_record(
+        continue_path, flag_once or max_episodes > 0
+    )
     (
         num_total,
         num_success,
@@ -288,28 +285,26 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         distance_to_goal_all,
         distance_to_goal_reward_all,
         last_time,
-    ) = read_record(continue_path, flag_once)
+    ) = state
+    structured_results = saved_state is not None or num_total == 0
+    number_of_episodes, env_count, remaining = episode_plan(
+        env.number_of_episodes, num_total, max_episodes, env_num_once
+    )
+    if not remaining:
+        print("Already completed the requested episodes.")
+        env.close()
+        return
 
-    if num_total >= number_of_episodes:
-        raise ValueError("Already finished all episodes.")
-
-    pbar = tqdm.tqdm(total=env.number_of_episodes)
-
-    env_count = num_total if not flag_once else env_num_once
+    pbar = tqdm.tqdm(total=number_of_episodes, initial=num_total)
     while env_count:
-        pbar.update()
-        env.current_episode = next(env.episode_iterator)
+        next(env.episode_iterator)
         env_count -= 1
 
-    for epi in range(number_of_episodes - num_total):
+    for epi in range(remaining):
         # Publish progress information
         node.publish_int32_array(node.progress_pub, [num_total, number_of_episodes])
 
-        if flag_once:
-            while env_count:
-                env.current_episode = next(env.episode_iterator)
-                env_count -= 1
-
+        episode_started = time.time()
         # Initialize episode variables
         pass_object = 0.0
         near_object = 0.0
@@ -322,12 +317,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         observations["camera_pitch"] = camera_pitch
         node.msg_observations = deepcopy(observations)
         del observations["camera_pitch"]
-        label = env.current_episode.object_category
-
-        # Convert object category to coco name format
-        if label in category_to_coco:
-            coco_id = category_to_coco[label]
-            label = id_to_name.get(coco_id, label)
+        label = detector_category(env.current_episode.object_category)
 
         # Get LLM answer and fusion threshold for the target object
         llm_answer, room, node.fusion_threshold = read_answer(
@@ -335,13 +325,14 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         )
 
         # Initialize video frame collection
-        vis_frames = []
+        episode_video = None
         info = env.get_metrics()
         if need_video:
             frame = observations_to_image(observations, info)
             info.pop("top_down_map")
             frame = overlay_frame(frame, info)
-            vis_frames = [frame]
+            episode_video = EpisodeVideo(video_output_path, num_total + 1)
+            episode_video.append(frame)
 
         # Start publishing basic information and trigger messages
         node.start_observation_timer()
@@ -454,7 +445,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 frame = observations_to_image(observations, info)
                 info.pop("top_down_map")
                 frame = overlay_frame(frame, info)
-                vis_frames.append(frame)
+                episode_video.append(frame)
 
             # Track if agent has passed close to the target
             distance_to_goal = info["distance_to_goal"]
@@ -521,15 +512,11 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
 
         img2video_output_path = os.path.join(video_output_path, result_text)
 
-        if flag_once:
-            img2video_output_path = "videos"
-            video_name = "video_once"
-
+        video_path = ""
         if need_video:
-            images_to_video(
-                vis_frames, img2video_output_path, video_name, fps=6, quality=9
+            video_path = os.path.relpath(
+                episode_video.finish(img2video_output_path, video_name), video_output_path
             )
-        vis_frames.clear()
 
         # Display average performance metrics
         table1 = PrettyTable(["Metric", "Average"])
@@ -549,9 +536,6 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         table2.add_row(["Total SPL", f"{spl_all:.2f}"])
         table2.add_row(["Total Soft SPL", f"{soft_spl_all:.2f}"])
         table2.add_row(["Total Distance to Goal", f"{distance_to_goal_all:.4f}"])
-
-        if flag_once:
-            break
 
         # Write results to record file
         write_record(
@@ -576,6 +560,16 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             time_spend,
             continue_path,
         )
+        if structured_results:
+            save_result(video_output_path, {
+                "episode_number": num_total, "scene_id": scene_id,
+                "episode_id": episode_id, "target": label, "steps": count_steps,
+                "success": int(success), "spl": float(spl), "soft_spl": float(soft_spl),
+                "distance_to_goal": float(distance_to_goal),
+                "distance_to_goal_reward": float(distance_to_goal_reward),
+                "result": result_text, "elapsed_seconds": time.time() - episode_started,
+                "cumulative_seconds": time_spend, "video_path": video_path,
+            }, 1 if flag_once else number_of_episodes)
 
         # Count files in each result category folder
         for i in range(len(RESULT_TYPES)):
@@ -595,7 +589,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         node.publish_float32_array(node.record_pub, record_data)
 
         pbar.update()
-        env.current_episode = next(env.episode_iterator)
+        if flag_once:
+            break
         time.sleep(0.1)  # wait a moment
 
     env.close()
@@ -623,6 +618,7 @@ if __name__ == "__main__":
         main(cfg, node, step_delay=step_delay)
     except Exception as e:
         print(f"Unexpected error occurred: {e}")
+        traceback.print_exc()
         rclpy.shutdown()
         os._exit(1)
     finally:

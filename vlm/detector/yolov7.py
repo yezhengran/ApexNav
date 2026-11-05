@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 import sys
 from typing import List, Optional
 
@@ -8,9 +10,15 @@ import torch
 from vlm.coco_classes import COCO_CLASSES
 from vlm.detector.detections import ObjectDetections
 
-from ..server_wrapper import ServerMixin, host_model, send_request, str_to_image
+from ..server_wrapper import ServerMixin, host_model, model_url, send_request, str_to_image
 
-sys.path.insert(0, "yolov7/")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_default_yolov7_root = Path("/opt/apexnav_deps/yolov7")
+if not _default_yolov7_root.is_dir():
+    _default_yolov7_root = PROJECT_ROOT / "yolov7"
+YOLOV7_ROOT = Path(os.environ.get("YOLOV7_ROOT", _default_yolov7_root))
+
+sys.path.insert(0, str(YOLOV7_ROOT))
 try:
     from models.experimental import attempt_load  # noqa: E402
     from utils.datasets import letterbox  # noqa: E402
@@ -50,8 +58,14 @@ class YOLOv7:
             ).to(self.device)
             if self.half_precision:
                 dummy_img = dummy_img.half()
-            for i in range(3):
-                self.model(dummy_img)
+            with torch.inference_mode():
+                for _ in range(3):
+                    self.model(dummy_img)
+            del dummy_img
+            # The four independent model servers share the laptop GPU with
+            # Habitat. Return unused load/trace/warm-up blocks to that shared
+            # pool once; keep the live weights and normal inference caching.
+            torch.cuda.empty_cache()
 
     def predict(
         self,
@@ -117,8 +131,8 @@ class YOLOv7:
 
 
 class YOLOv7Client:
-    def __init__(self, port: int = 12184):
-        self.url = f"http://localhost:{port}/yolov7"
+    def __init__(self, port: int = 12184, url: Optional[str] = None):
+        self.url = model_url("yolo", port, url)
 
     def predict(
         self,
@@ -160,7 +174,9 @@ if __name__ == "__main__":
                 iou_thres=iou_thres,
             ).to_json()
 
-    yolov7 = YOLOv7Server("data/yolov7-e6e.pt")
+    yolov7 = YOLOv7Server(
+        os.environ.get("YOLOV7_WEIGHTS", str(PROJECT_ROOT / "data/yolov7-e6e.pt"))
+    )
     print("Model loaded!")
     print(f"Hosting on port {args.port}...")
     host_model(yolov7, name="yolov7", port=args.port)

@@ -1,0 +1,20 @@
+diff --git a/habitat-lab/habitat/tasks/nav/nav.py b/habitat-lab/habitat/tasks/nav/nav.py
+--- a/habitat-lab/habitat/tasks/nav/nav.py
++++ b/habitat-lab/habitat/tasks/nav/nav.py
+@@ -1048,9 +1048,13 @@ class NavigationMovementAgentAction(SimulatorTaskAction):
+         assert (
+             len(self._sim.agents) == 1  # type: ignore
+         ), "For navigation tasks, there can be only one agent in the scene"
+-        sensor_names = list(self._sim.agents[0].sensors.keys())  # type: ignore
+-        for sensor_name in sensor_names:
+-            sensor = self._sim.agents[0].sensors[sensor_name].node  # type: ignore
++        agent = self._sim.agents[0]  # type: ignore
++        sensors = getattr(agent, "sensors", None)
++        if sensors is None:
++            # Habitat-Sim acbe6f49 stores the same suite under _sensors.
++            sensors = agent._sensors
++        for sim_sensor in sensors.values():
++            sensor = sim_sensor.node
+             sensor.rotation = sensor.rotation * mn.Quaternion.rotation(
+                 mn.Deg(amount), mn.Vector3.x_axis()
+             )

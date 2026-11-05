@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 import cv2
-from ..server_wrapper import ServerMixin, host_model, send_request, str_to_image
+from ..server_wrapper import ServerMixin, host_model, model_url, send_request, str_to_image
 
 try:
     from lavis.models import load_model_and_preprocess
@@ -67,8 +67,8 @@ class BLIP2ITM:
 
 
 class BLIP2ITMClient:
-    def __init__(self, port: int = 12182):
-        self.url = f"http://localhost:{port}/blip2itm"
+    def __init__(self, port: int = 12182, url: Optional[str] = None):
+        self.url = model_url("blip2", port, url)
 
     def cosine(self, image: np.ndarray, txt: str) -> float:
         # print(f"BLIP2ITMClient.cosine: {image.shape}, {txt}")

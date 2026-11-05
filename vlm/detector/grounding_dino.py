@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -6,7 +8,7 @@ import torchvision.transforms.functional as F
 import groundingdino.datasets.transforms as T
 from vlm.detector.detections import ObjectDetections
 
-from ..server_wrapper import ServerMixin, host_model, send_request, str_to_image
+from ..server_wrapper import ServerMixin, host_model, model_url, send_request, str_to_image
 
 try:
     from groundingdino.util.inference import load_model, predict
@@ -15,8 +17,24 @@ except ModuleNotFoundError:
         "Could not import groundingdino. This is OK if you are only using the client."
     )
 
-GROUNDING_DINO_CONFIG = "GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
-GROUNDING_DINO_WEIGHTS = "data/groundingdino_swint_ogc.pth"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_default_grounding_dino_root = Path("/opt/apexnav_deps/GroundingDINO")
+if not _default_grounding_dino_root.is_dir():
+    _default_grounding_dino_root = PROJECT_ROOT / "GroundingDINO"
+GROUNDING_DINO_ROOT = Path(
+    os.environ.get("GROUNDING_DINO_ROOT", _default_grounding_dino_root)
+)
+GROUNDING_DINO_CONFIG = os.environ.get(
+    "GROUNDING_DINO_CONFIG",
+    str(
+        GROUNDING_DINO_ROOT
+        / "groundingdino/config/GroundingDINO_SwinT_OGC.py"
+    ),
+)
+GROUNDING_DINO_WEIGHTS = os.environ.get(
+    "GROUNDING_DINO_WEIGHTS",
+    str(PROJECT_ROOT / "data/groundingdino_swint_ogc.pth"),
+)
 CLASSES = "chair . person . dog ."  # Default classes. Can be overridden at inference.
 
 
@@ -81,8 +99,8 @@ class GroundingDINO:
 
 
 class GroundingDINOClient:
-    def __init__(self, port: int = 12181):
-        self.url = f"http://localhost:{port}/gdino"
+    def __init__(self, port: int = 12181, url: Optional[str] = None):
+        self.url = model_url("dino", port, url)
 
     def predict(
         self,

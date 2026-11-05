@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import base64
+import hmac
 import os
 import random
 import socket
+import sys
 import time
 from typing import Any, Dict
 
@@ -9,6 +13,29 @@ import cv2
 import numpy as np
 import requests
 from flask import Flask, jsonify, request
+
+
+MODEL_ENDPOINTS = {
+    "dino": ("APEXNAV_GDINO_URL", 12181, "gdino"),
+    "blip2": ("APEXNAV_BLIP2_URL", 12182, "blip2itm"),
+    "sam": ("APEXNAV_SAM_URL", 12183, "mobile_sam"),
+    "yolo": ("APEXNAV_YOLO_URL", 12184, "yolov7"),
+}
+
+
+def model_url(name: str, port: int | None = None, url: str | None = None) -> str:
+    """Resolve a complete API URL, retaining legacy localhost/port defaults."""
+    variable, default_port, route = MODEL_ENDPOINTS[name]
+    override = url or os.environ.get(variable)
+    if override:
+        return override.rstrip("/")
+    host = os.environ.get("APEXNAV_VLM_HOST", "127.0.0.1")
+    return f"http://{host}:{port or default_port}/{route}"
+
+
+def api_headers() -> dict[str, str]:
+    token = os.environ.get("APEXNAV_VLM_API_KEY", "")
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 class ServerMixin:
@@ -19,18 +46,49 @@ class ServerMixin:
         raise NotImplementedError
 
 
+def release_idle_cuda_cache() -> None:
+    """Optionally share unused allocator blocks with other model processes/EGL."""
+    if os.environ.get("APEXNAV_VLM_RELEASE_IDLE_CACHE", "0") != "1":
+        return
+    # Do not import torch or initialize CUDA in HTTP-only clients/CPU services.
+    torch_module = sys.modules.get("torch")
+    if torch_module is not None and torch_module.cuda.is_initialized():
+        torch_module.cuda.empty_cache()
+
+
 def host_model(model: Any, name: str, port: int = 5000) -> None:
     """
     Hosts a model as a REST API using Flask.
     """
+    release_idle_cuda_cache()
     app = Flask(__name__)
+
+    @app.before_request
+    def authorize_request():
+        token = os.environ.get("APEXNAV_VLM_SERVER_TOKEN", "")
+        if token and not hmac.compare_digest(
+            request.headers.get("Authorization", ""), f"Bearer {token}"
+        ):
+            return jsonify({"error": "unauthorized"}), 401
+
+    @app.get("/healthz")
+    def health_check() -> Dict[str, Any]:
+        return {"status": "ready", "model": name}
 
     @app.route(f"/{name}", methods=["POST"])
     def process_request() -> Dict[str, Any]:
         payload = request.json
-        return jsonify(model.process_payload(payload))
+        try:
+            return jsonify(model.process_payload(payload))
+        finally:
+            release_idle_cuda_cache()
 
-    app.run(host="localhost", port=port)
+    # Each model holds mutable inference state; serialize requests within it.
+    app.run(
+        host=os.environ.get("APEXNAV_VLM_BIND_HOST", "127.0.0.1"),
+        port=port,
+        threaded=False,
+    )
 
 
 def bool_arr_to_str(arr: np.ndarray) -> str:
@@ -53,7 +111,7 @@ def str_to_bool_arr(s: str, shape: tuple) -> np.ndarray:
 
 
 def image_to_str(img_np: np.ndarray, quality: float = 90.0) -> str:
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
     retval, buffer = cv2.imencode(".jpg", img_np, encode_param)
     img_str = base64.b64encode(buffer).decode("utf-8")
     return img_str
@@ -67,20 +125,16 @@ def str_to_image(img_str: str) -> np.ndarray:
 
 
 def send_request(url: str, **kwargs: Any) -> dict:
-    response = {}
-    for attempt in range(10):
+    for attempt in range(3):
         try:
-            response = _send_request(url, **kwargs)
-            break
-        except Exception as e:
-            if attempt == 9:
-                print(e)
-                exit()
-            else:
-                print(f"Error: {e}. Retrying in 20-30 seconds...")
-                time.sleep(20 + random.random() * 10)
-
-    return response
+            return _send_request(url, **kwargs)
+        except requests.HTTPError:
+            # Authentication and payload errors need a configuration change.
+            raise
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def _send_request(url: str, **kwargs: Any) -> dict:
@@ -125,24 +179,13 @@ def _send_request(url: str, **kwargs: Any) -> dict:
             else:
                 payload[k] = v
         # Set the headers
-        headers = {"Content-Type": "application/json"}
-
-        start_time = time.time()
-        while True:
-            try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=1)
-                if resp.status_code == 200:
-                    result = resp.json()
-                    break
-                else:
-                    raise Exception("Request failed")
-            except (
-                requests.exceptions.Timeout,
-                requests.exceptions.RequestException,
-            ) as e:
-                print(e)
-                if time.time() - start_time > 20:
-                    raise Exception("Request timed out after 20 seconds")
+        headers = {"Content-Type": "application/json", **api_headers()}
+        read_timeout = float(os.environ.get("APEXNAV_VLM_TIMEOUT", "120"))
+        resp = requests.post(
+            url, headers=headers, json=payload, timeout=(5, read_timeout)
+        )
+        resp.raise_for_status()
+        result = resp.json()
 
         try:
             # Delete the lock file

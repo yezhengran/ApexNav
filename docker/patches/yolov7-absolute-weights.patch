@@ -1,0 +1,20 @@
+diff --git a/models/experimental.py b/models/experimental.py
+index 754f092..aa5096d 100644
+--- a/models/experimental.py
++++ b/models/experimental.py
+@@ -1,4 +1,5 @@
+ import numpy as np
++from pathlib import Path
+ import random
+ import torch
+ import torch.nn as nn
+@@ -248,7 +249,8 @@ def attempt_load(weights, map_location=None):
+     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
+     model = Ensemble()
+     for w in weights if isinstance(weights, list) else [weights]:
+-        attempt_download(w)
++        if not Path(w).is_file():
++            attempt_download(w)
+         ckpt = torch.load(w, map_location=map_location, weights_only=False)  # load
+         model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval())  # FP32 model
+     

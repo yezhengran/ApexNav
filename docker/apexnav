@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+container="${APEXNAV_CONTAINER:-apexnav-jazzy-egl}"
+project="/workspace/ApexNav"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd -- "$script_dir/.." && pwd)"
+environment=()
+if [[ -f "$project_root/config/vlm.env" ]]; then
+    environment+=(--env-file "$project_root/config/vlm.env")
+fi
+for variable in APEXNAV_VLM_HOST APEXNAV_GDINO_URL APEXNAV_BLIP2_URL \
+    APEXNAV_SAM_URL APEXNAV_YOLO_URL APEXNAV_VLM_API_KEY APEXNAV_VLM_TIMEOUT \
+    APEXNAV_VLM_BIND_HOST APEXNAV_VLM_SERVER_TOKEN APEXNAV_VLM_RELEASE_IDLE_CACHE \
+    APEXNAV_ROS_DOMAIN_ID; do
+    if [[ -v "$variable" ]]; then
+        environment+=(-e "$variable")
+    fi
+done
+
+container_exec() {
+    docker exec "${environment[@]}" "$@"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: docker/apexnav COMMAND
+
+Commands:
+  status        Show container, GPU, memory, and disk status
+  start         Start the container if it is stopped
+  shell         Open a ROS 2 + Python virtualenv shell in the project
+  build         Rebuild the ROS 2 workspace with colcon
+  doctor        Run CUDA, ROS, VLM, weight, and Habitat EGL checks
+  check-data    Check HM3Dv2 validation tasks and required scene assets
+  vlm-check     Check configured VLM APIs (add --health-only to skip inference)
+  vlm-start-local  Explicitly start local GPU model services (optional)
+  vlm-stop-local   Stop services owned by the local launcher
+  smoke         Render an HM3D scene and verify ROS planner communication
+  run-one [DATASET] [EPISODE]  Evaluate one episode using configured VLM APIs
+  run-batch [DATASET] --episodes N [--video]  Save a bounded experiment
+  commit [TAG]  Save the configured container as an image
+EOF
+}
+
+require_container() {
+    docker inspect "$container" >/dev/null 2>&1 || {
+        echo "Container not found: $container" >&2
+        exit 1
+    }
+}
+
+start_container() {
+    require_container
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != "true" ]]; then
+        docker start "$container" >/dev/null
+    fi
+}
+
+case "${1:-}" in
+    status)
+        require_container
+        docker ps -a --filter "name=^/${container}$"
+        docker stats --no-stream "$container"
+        docker exec "$container" nvidia-smi
+        docker exec "$container" df -h / /workspace/ApexNav
+        ;;
+    start)
+        start_container
+        echo "Started: $container"
+        ;;
+    shell)
+        start_container
+        container_exec -it -w "$project" "$container" bash -lc '
+            source /opt/ros/jazzy/setup.bash
+            source /opt/apexnav_venv/bin/activate
+            if [[ -f /opt/apexnav_ws/install/setup.bash ]]; then
+                source /opt/apexnav_ws/install/setup.bash
+            fi
+            exec bash
+        '
+        ;;
+    build)
+        start_container
+        container_exec -w "$project" "$container" bash -lc '
+            source /opt/ros/jazzy/setup.bash
+            source /opt/apexnav_venv/bin/activate
+            colcon --log-base /opt/apexnav_ws/log build \
+                --base-paths /workspace/ApexNav/src \
+                --build-base /opt/apexnav_ws/build \
+                --install-base /opt/apexnav_ws/install
+        '
+        ;;
+    doctor)
+        start_container
+        container_exec -w "$project" "$container" bash -lc '
+            source /opt/ros/jazzy/setup.bash
+            source /opt/apexnav_venv/bin/activate
+            if [[ -f /opt/apexnav_ws/install/setup.bash ]]; then
+                source /opt/apexnav_ws/install/setup.bash
+            fi
+            python docker/verify_environment.py
+        '
+        ;;
+    check-data|vlm-check|vlm-start-local|vlm-stop-local|smoke|run-one|run-batch)
+        start_container
+        action="$1"
+        shift
+        interactive=()
+        if [[ "$action" == run-batch && -t 0 && -t 1 ]]; then
+            interactive=(-it)
+        fi
+        container_exec "${interactive[@]}" -w "$project" "$container" bash -lc '
+            set -eo pipefail
+            source /opt/ros/jazzy/setup.bash
+            source /opt/apexnav_venv/bin/activate
+            source /opt/apexnav_ws/install/setup.bash
+            action="$1"
+            shift
+            case "$action" in
+                check-data) python docker/check_dataset.py "$@" ;;
+                vlm-check) python docker/check_vlm_http.py "$@" ;;
+                vlm-start-local) python docker/runtime.py start "$@" ;;
+                vlm-stop-local) python docker/runtime.py stop "$@" ;;
+                smoke) python docker/habitat_ros_smoke.py "$@" ;;
+                run-one) python docker/run_episode.py "$@" ;;
+                run-batch) exec python docker/run_batch.py "$@" ;;
+            esac
+        ' bash "$action" "$@"
+        ;;
+    commit)
+        start_container
+        tag="${2:-apexnav-jazzy:apexnav-v033-cu128}"
+        docker commit "$container" "$tag"
+        echo "Saved image: $tag"
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac

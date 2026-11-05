@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any, List, Optional
 
 import numpy as np
@@ -8,6 +9,7 @@ from ..server_wrapper import (
     ServerMixin,
     bool_arr_to_str,
     host_model,
+    model_url,
     send_request,
     str_to_bool_arr,
     str_to_image,
@@ -61,8 +63,8 @@ class MobileSAM:
 
 
 class MobileSAMClient:
-    def __init__(self, port: int = 12183):
-        self.url = f"http://localhost:{port}/mobile_sam"
+    def __init__(self, port: int = 12183, url: Optional[str] = None):
+        self.url = model_url("sam", port, url)
 
     def segment_bbox(self, image: np.ndarray, bbox: List[int]) -> np.ndarray:
         response = send_request(self.url, image=image, bbox=bbox)
@@ -88,8 +90,11 @@ if __name__ == "__main__":
             cropped_mask_str = bool_arr_to_str(cropped_mask)
             return {"cropped_mask": cropped_mask_str}
 
+    project_root = Path(__file__).resolve().parents[2]
     mobile_sam = MobileSAMServer(
-        sam_checkpoint=os.environ.get("MOBILE_SAM_CHECKPOINT", "data/mobile_sam.pt")
+        sam_checkpoint=os.environ.get(
+            "MOBILE_SAM_CHECKPOINT", str(project_root / "data/mobile_sam.pt")
+        )
     )
     print("Model loaded!")
     print(f"Hosting on port {args.port}...")

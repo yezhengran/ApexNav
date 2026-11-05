@@ -10,6 +10,11 @@ __pycache__/
 build
 devel
 lockfiles
+config/vlm.env
+
+# Host-only playback tools and personal experiment records
+.apexnav-tools/
+experiment_notes/
 
 .catkin_workspace
 .vscode

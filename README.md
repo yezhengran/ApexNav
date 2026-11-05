@@ -45,6 +45,11 @@ This is the **ROS2 Jazzy** port of [ApexNav](https://github.com/Robotics-STAR-La
 ## Installation
 > Tested on Ubuntu 24.04 with ROS2 Jazzy and Python 3.12
 
+For the reproducible NVIDIA EGL container used by this branch, see
+[`docker/README.md`](docker/README.md). The `docker/apexnav` helper provides a
+ready-to-use shell, ROS build command, full environment doctor, and image
+checkpoint command.
+
 You need to install [ROS2 Jazzy](https://docs.ros.org/en/jazzy/Installation.html), and it is recommended to use [Anaconda](https://www.anaconda.com/) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to manage your Python environment.
 
 ### 1. Prerequisites
@@ -180,6 +185,11 @@ source install/setup.bash
 ```
 
 ### Run VLMs Servers
+For an 8 GB laptop GPU, use the configurable remote API workflow in
+[`docker/README.md`](docker/README.md#remote-vlm-apis-recommended-on-the-8-gb-laptop-gpu).
+Set the four URLs in `config/vlm.env` and run `docker/apexnav vlm-check`;
+Habitat/ROS then runs locally without starting the local model servers below.
+
 Each command should be run in a separate terminal.
 ``` bash
 python -m vlm.detector.grounding_dino --port 12181
