@@ -84,6 +84,7 @@ public:
       double& max_to_mean, double& mean, bool if_print = false);
 
   shared_ptr<ExplorationData> ed_;            ///< Exploration data container
+  bool verified_targets_only_ = false;       ///< Opt-in gate; baseline retains all fallbacks
   shared_ptr<ExplorationParam> ep_;           ///< Exploration parameters
   unique_ptr<Astar2D> path_finder_;           ///< A* path finding algorithm
   shared_ptr<FrontierMap2D> frontier_map2d_;  ///< 2D frontier map

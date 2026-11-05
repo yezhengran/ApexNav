@@ -153,7 +153,10 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
       }
 
       // Include lower confidence objects in extreme search
-      sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, false, true);
+      // All label-0 clouds were VLM-gated by the evaluator in this mode.
+      // The baseline's all-class fallback would bypass that confirmation.
+      sdf_map_->object_map2d_->getTopConfidenceObjectCloud(
+          object_clouds, false, !verified_targets_only_);
       for (auto object_cloud : object_clouds) {
         if (!object_cloud->points.empty() &&
             searchObjectPathExtreme(pos, object_cloud, ed_->next_pos_, ed_->next_best_path_))
@@ -165,9 +168,13 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
       if (!object_map2d_->over_depth_object_cloud_->points.empty())
         last_over_depth_object_cloud = object_map2d_->over_depth_object_cloud_;
 
-      if (!last_over_depth_object_cloud->points.empty() &&
+      // The baseline static cache can outlive an episode. Verification mode
+      // may only use evidence admitted for this episode's target.
+      auto fallback_cloud = verified_targets_only_ ?
+          object_map2d_->over_depth_object_cloud_ : last_over_depth_object_cloud;
+      if (!fallback_cloud->points.empty() &&
           searchObjectPathExtreme(
-              pos, last_over_depth_object_cloud, ed_->next_pos_, ed_->next_best_path_)) {
+              pos, fallback_cloud, ed_->next_pos_, ed_->next_best_path_)) {
         return SEARCH_EXTREME;
       }
     }

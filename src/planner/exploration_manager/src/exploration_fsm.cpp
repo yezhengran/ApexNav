@@ -56,6 +56,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
           return;
         }
         fd_->replan_flag_ = true;
+        expl_manager_->verified_targets_only_ = true;
         fd_->dormant_frontier_flag_ = true;
         fd_->final_result_ = FINAL_RESULT::EXPLORE;
         std_msgs::msg::Int32 ack;
