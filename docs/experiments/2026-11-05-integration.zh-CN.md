@@ -39,5 +39,14 @@
 
 - 构建日志、四模型内存 JSON：`outputs/validation/20261105-integration/`。
 - 离线和内存测试日志：`experiment_notes/validation/20261105-adaptive-view/`，均已被 Git 忽略。
-- 尚无本轮导航成绩。先完成完整单回合、10 回合排障，再冻结源码，用相同 seed=100、顺序 episode 集、500 步、视频设置分别运行 baseline/adaptive_view 各 50 回合。
+- 继续 10 回合排障，再冻结源码，用相同 seed=100、顺序 episode 集、500 步、视频设置分别运行 baseline/adaptive_view 各 50 回合。
 - 每回合保存指标与实际 episode 身份，每 10 回合保存检查点；部分结果明确报告完成数量。新批次不续接旧无 provenance 的 27/50 数据。
+
+## 完整单回合（已完成）
+
+`outputs/runs/av-smoke-1/`：代码 `cbe50fe1dbe63738595494e4499419967646f3b6`，运行源码指纹 `bfc60bd7e915e8fea2f4004bf1f1e2aa55a839200a601d798246b05df021a6d9`；`adaptive_view`、seed=100、500 步上限、视频开启。实际场景 `4ok3usBNeis`、episode ID `0`、目标 `bed`。
+
+- 完成 1/1、success；345 步、96.73 秒，SPL=13.7467%、Soft SPL=13.6802%、终点距离=0.0263 m。
+- 额外候选验证 VLM 调用 9 次（合计 0.917 秒）、接受 1 个、拒绝 6 个；主动观测尝试 6 次、动作 68 次。包含真实移动与到点当前 crop 复核，证明新增链路已执行，不代表效果改善。
+- 失败证据：candidate 4 的主动 crop 可见床，ITM=0.5207，低于初始 0.65 阈值而被拒绝；candidate 7 的历史 crop 得到 0.7147 被接受。当前存在误拒绝和同一床的部分几何被拆成不同候选的迹象，需在 10 回合及同集基线中检查代价；此处不凭单样本调整阈值。
+- `summary.json`、`episodes.csv`、`checkpoint-0001.json`、实际 episode 清单、验证事件/裁剪图与成功 MP4 均已保存；启动器状态 `completed / 0`。导航期间 available 约 2.6–2.7 GiB，未见 OOM。

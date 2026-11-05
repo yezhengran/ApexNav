@@ -10,7 +10,7 @@
 - 保存逐回合指标、每 10 回合检查点、验证 crop/分数/位姿和实际 episode 清单；`docker/compare_runs.py` 检查同集同配置源码的共同前缀。新批次源码需提交，旧无 provenance 的目录不可用新启动器续跑，以免混入新版本。
 - 已通过 12 项离线确认逻辑、独立 C++17 观测点/路径安全、批量记录/对照及语法/空白检查。临时测试脚本验证后清理，记录在被忽略的 `experiment_notes/validation/20261105-adaptive-view/`。
 - 用户已在主机完成 Docker 授权；本会话可在沙箱外访问现有容器。`55c11c6` 已完成真实 ROS2 六包构建（并发限制为 2）、容器内批量/视频 8 项、HTTP 协议 8 项、Habitat 动作 2 项回归；真实场景 `HABITAT_ROS_SMOKE_OK` 和四个模型的 HTTP 推理通过。
-- **新的 ObjectNav 单回合/10 回合及两组 50 episode 仍待运行。** 四模型推理后主机 available 曾降到 808 MiB、无 swap；已验证启动缓存回收，用户关闭其他应用后重启四模型，HTTP 推理通过，available 约 5.3 GiB。不能将接口冒烟算作完整导航成功；启动前仍复查进程、RAM/GPU。集成与内存记录见 [续作验证](experiments/2026-11-05-integration.zh-CN.md)。
+- 完整 `adaptive_view` 单回合已成功：`av-smoke-1`、代码 `cbe50fe`，345 步、SPL=13.75%，9 次额外 VLM 调用，存在真实床 crop 被拒绝的证据。**10 回合及两组 50 episode 仍待完成，尚不能宣称算法改善。** 已验证启动 CPU 缓存回收；用户关闭其他应用后四模型可用，导航期间 available 约 2.6 GiB。集成、内存与单回合记录见 [续作验证](experiments/2026-11-05-integration.zh-CN.md)。
 - 旧 27/50 的文本日志可读：25 成功、2 无前沿，SR=92.59%、SPL=51.26%（舍入），单场景 `4ok3usBNeis`。仅为历史部分结果，无运行 SHA，不能充当本轮正式基线。
 
 ## 1. 用户意图
