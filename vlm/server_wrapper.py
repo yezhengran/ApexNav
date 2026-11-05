@@ -56,11 +56,29 @@ def release_idle_cuda_cache() -> None:
         torch_module.cuda.empty_cache()
 
 
+def release_startup_host_cache() -> None:
+    """Return freed model loading/tracing buffers on glibc-based hosts."""
+    if os.environ.get("APEXNAV_VLM_RELEASE_IDLE_CACHE", "0") != "1":
+        return
+    import ctypes
+    import gc
+
+    gc.collect()
+    try:
+        malloc_trim = ctypes.CDLL(None).malloc_trim
+    except (AttributeError, OSError):
+        return  # Optional allocator optimization; unsupported hosts keep working.
+    malloc_trim.argtypes = [ctypes.c_size_t]
+    malloc_trim.restype = ctypes.c_int
+    malloc_trim(0)
+
+
 def host_model(model: Any, name: str, port: int = 5000) -> None:
     """
     Hosts a model as a REST API using Flask.
     """
     release_idle_cuda_cache()
+    release_startup_host_cache()
     app = Flask(__name__)
 
     @app.before_request

@@ -45,11 +45,11 @@ docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验**：总目标仍是 50 回合，已完成回合保留，未完成回合重试。
+**续跑原实验**：以下仅适用于由新启动器创建、带 provenance 的基线批次。总目标仍是 50 回合，已完成回合保留，未完成回合重试。
 
 ```bash
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video \
-  --output outputs/runs/hm3dv2-local-50 --resume
+  --method baseline --seed 100 --output outputs/runs/av-baseline-50 --resume
 ```
 
 续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。

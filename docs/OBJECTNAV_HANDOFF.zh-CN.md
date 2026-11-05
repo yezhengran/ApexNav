@@ -8,8 +8,9 @@
 
 - 当前已实现默认关闭的 `baseline / vlm / fixed_view / adaptive_view` 设置。复用 BLIP2；没有迁入 DynZSON 整套导航，也没有更换视觉模型。入口为 `vlm/active_view.py` 与 C++ `exploration_manager/active_view.h` / FSM。
 - 保存逐回合指标、每 10 回合检查点、验证 crop/分数/位姿和实际 episode 清单；`docker/compare_runs.py` 检查同集同配置源码的共同前缀。新批次源码需提交，旧无 provenance 的目录不可用新启动器续跑，以免混入新版本。
-- 已通过 12 项离线确认逻辑、独立 C++17 观测点/路径安全、7 项批量记录/对照检查及语法/空白检查。临时测试脚本已清理，记录在被忽略的 `experiment_notes/validation/20261105-adaptive-view/`。主机视频测试缺 `imageio`。
-- **尚未完成完整 ROS2 构建、Habitat/GPU 集成或新的 50 episode。** 主机 GPU 正常，Docker socket 访问拒绝，`sudo -n` 要求密码；未修改授权、权限或驱动。先恢复已有授权下的 Docker 可访问会话，再检查是否有运行中的评测、构建、单回合/10 回合验证，最后顺序运行基线和方法各同一 50 回合。
+- 已通过 12 项离线确认逻辑、独立 C++17 观测点/路径安全、批量记录/对照及语法/空白检查。临时测试脚本验证后清理，记录在被忽略的 `experiment_notes/validation/20261105-adaptive-view/`。
+- 用户已在主机完成 Docker 授权；本会话可在沙箱外访问现有容器。`55c11c6` 已完成真实 ROS2 六包构建（并发限制为 2）、容器内批量/视频 8 项、HTTP 协议 8 项、Habitat 动作 2 项回归；真实场景 `HABITAT_ROS_SMOKE_OK` 和四个模型的 HTTP 推理通过。
+- **新的 ObjectNav 单回合/10 回合及两组 50 episode 仍待运行。** 四模型推理后主机 available 曾降到 808 MiB、无 swap；已验证启动缓存回收，用户关闭其他应用后重启四模型，HTTP 推理通过，available 约 5.3 GiB。不能将接口冒烟算作完整导航成功；启动前仍复查进程、RAM/GPU。集成与内存记录见 [续作验证](experiments/2026-11-05-integration.zh-CN.md)。
 - 旧 27/50 的文本日志可读：25 成功、2 无前沿，SR=92.59%、SPL=51.26%（舍入），单场景 `4ok3usBNeis`。仅为历史部分结果，无运行 SHA，不能充当本轮正式基线。
 
 ## 1. 用户意图
@@ -60,7 +61,7 @@
 
 旧结果在 `outputs/runs/hm3dv2-local-50/`：本轮读到 `status.json` 为 `interrupted / 130`，日志最后记录完成第 **27** 个回合。汇总 JSON 需要容器权限读取；**50 回合尚不能认定完成**，不要据此发布完整 50 回合成绩。
 
-本轮验证：数据完整性检查、5 项无模型依赖的计数/续跑/清理测试、21 个变动 Python 文件的 Python 3.12 语法检查、Shell 语法检查通过。Docker socket 访问被拒绝，`sudo -n` 需要密码，因此本轮未重跑 GPU/Habitat 集成、模型 HTTP 回归和视频编码测试。较早运行证据见容器说明，不能当作本轮新测试。
+最初因 Docker 权限受限，只完成数据完整性、离线回归与语法检查；用户处理权限后已补做构建、GPU/Habitat 冒烟、模型 HTTP 与视频回归，详见顶部续作状态。完整导航与正式成绩仍需以新批次文件为准。
 
 曾发生主机 RAM 耗尽导致桌面应用退出。显存足够也应检查 `free -h`；模型占显存不等于评测进程仍在运行。
 

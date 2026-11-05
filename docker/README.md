@@ -69,6 +69,11 @@ architectures are unchanged. This trades some allocation/latency overhead for
 headroom; set it to `0` on a larger GPU to favor cache reuse. See
 [PyTorch's cache-release semantics](https://docs.pytorch.org/docs/2.10/generated/torch.cuda.memory.empty_cache.html).
 
+The same opt-in also collects unreachable Python objects and calls glibc
+`malloc_trim(0)` once after model loading/tracing, before serving requests.
+This returns freed CPU buffers to the OS without changing live tensors; it is
+skipped on hosts without `malloc_trim`. CPU trimming is not repeated per frame.
+
 The 16 GB host RAM is also tight: about 1.3 GiB remained available after the
 first joint test with other desktop apps open. Close unnecessary memory-heavy
 applications before a full episode. `run-one` uses cached LLM answers instead
