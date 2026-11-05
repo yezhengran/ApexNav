@@ -54,6 +54,18 @@ docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
 
 续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。
 
+2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。工作区必须提交；续跑需保持这些设置一致。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
+
+尺寸自适应观测的正式对照在构建和短验证通过后顺序运行（细节见 [实验记录](../docs/experiments/2026-11-05-adaptive-view-plan.zh-CN.md)）：
+
+```bash
+./docker/apexnav run-batch hm3dv2 --episodes 50 --method baseline --seed 100 --video --output outputs/runs/av-baseline-50
+./docker/apexnav run-batch hm3dv2 --episodes 50 --method adaptive_view --seed 100 --video --output outputs/runs/av-adaptive-50
+python3 docker/compare_runs.py outputs/runs/av-baseline-50 outputs/runs/av-adaptive-50
+```
+
+消融设置为 `--method vlm`（只做历史确认）、`--method fixed_view`（固定边缘净距 0.90 m）。各组使用独立目录。每回合保存 summary/CSV，每 10 回合另存 checkpoint；不足 50 回合的比较会标记未完成。
+
 tmux：`Ctrl+B` 松开后按 `D` 离开但保持运行；`tmux ls` 查看；`tmux attach -t apexnav-next` 返回已有会话。
 不要在已有会话中重复启动实验。tmux 不能防止内存不足、重启或休眠。
 

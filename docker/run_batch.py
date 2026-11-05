@@ -4,6 +4,7 @@
 import argparse
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -36,16 +37,40 @@ def stop_owned(process):
     process.wait()
 
 
-def evaluation_command(dataset, episodes, output, video, max_steps=None):
+def evaluation_command(dataset, episodes, output, video, max_steps=None,
+                       method="baseline", seed=100):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         "test_epi_num=-1", f"+max_episodes={episodes}",
         "llm.llm_client.llm_client=none", f"need_video={str(video).lower()}",
         f"video_output_path={output}",
+        f"habitat.seed={seed}",
     ]
+    if method != "baseline":
+        command.append(f"active_view.mode={method}")
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
+
+
+def source_provenance():
+    """Fingerprint tracked runtime files; documentation commits may follow a run."""
+    # The bind-mounted checkout is owned by the host user; trust only this
+    # explicit path for this invocation, never change global Git configuration.
+    git = ["git", "-c", f"safe.directory={ROOT}"]
+    revision = subprocess.check_output([*git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    names = subprocess.check_output([*git, "ls-files", "-z"], cwd=ROOT).split(b"\0")
+    digest = hashlib.sha256()
+    for name in sorted(n for n in names if n):
+        path = ROOT / os.fsdecode(name)
+        if (path.suffix in (".py", ".cpp", ".h", ".hpp", ".yaml", ".patch", ".sh") or
+                name == b"docker/apexnav"):
+            digest.update(name + b"\0" + path.read_bytes() + b"\0")
+    dirty = subprocess.check_output(
+        [*git, "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip()
+    if dirty:
+        raise RuntimeError("Commit source/config changes before starting a reproducible batch")
+    return {"code_sha": revision, "source_sha256": digest.hexdigest()}
 
 
 def main():
@@ -58,6 +83,9 @@ def main():
     parser.add_argument("--output", help="New experiment directory inside outputs/runs")
     parser.add_argument("--resume", action="store_true", help="Continue the same --output directory")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
+    parser.add_argument("--method", choices=["baseline", "vlm", "fixed_view", "adaptive_view"],
+                        default="baseline")
+    parser.add_argument("--seed", type=int, default=100)
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error("--episodes must be positive")
@@ -65,13 +93,17 @@ def main():
         parser.error("--max-steps must be positive")
     if args.resume and not args.output:
         parser.error("--resume requires --output")
+    if args.method != "baseline" and args.dataset != "hm3dv2":
+        parser.error("Active-view experiments currently require hm3dv2")
     stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
     output = Path(args.output or f"outputs/runs/{args.dataset}-{args.episodes}-{stamp}")
     output = (ROOT / output).resolve()
     if not output.is_relative_to(ROOT / "outputs/runs") or output == ROOT / "outputs/runs":
         parser.error("--output must name a directory below outputs/runs")
-    command = evaluation_command(args.dataset, args.episodes, output, args.video, args.max_steps)
+    command = evaluation_command(args.dataset, args.episodes, output, args.video, args.max_steps,
+                                 args.method, args.seed)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
+            "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
@@ -96,12 +128,18 @@ def main():
         except BlockingIOError:
             raise RuntimeError("Another batch evaluation is running; do not share its ROS domain")
         manifest = output / "experiment.json"
+        provenance = source_provenance()
         if args.resume:
             if not manifest.is_file() or json.loads(manifest.read_text()) != spec:
-                raise RuntimeError("Resume requires an existing experiment with identical dataset/count/video settings")
+                raise RuntimeError("Resume requires identical dataset/count/video/method/seed settings; "
+                                   "legacy runs without provenance must use a separate directory")
+            old = json.loads((output / "provenance.json").read_text())
+            if old["source_sha256"] != provenance["source_sha256"]:
+                raise RuntimeError("Runtime source changed; start a separate experiment")
         else:
             output.mkdir(parents=True, exist_ok=False)
             manifest.write_text(json.dumps(spec, indent=2) + "\n")
+            (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
         print(f"Experiment directory: {output}", flush=True)
         subprocess.run([sys.executable, "docker/check_dataset.py", "--dataset", args.dataset], check=True)
         subprocess.run([sys.executable, "docker/check_vlm_http.py"], check=True)

@@ -21,6 +21,9 @@ class ACTION:
     TURN_RIGHT = 3
     TURN_DOWN = 4
     TURN_UP = 5
+    # Internal planner/evaluator handshakes, not Habitat sensor/physics steps.
+    INSPECT = 6
+    INSPECTION_FAILED = 7
 
 
 RESULT_TYPES = [

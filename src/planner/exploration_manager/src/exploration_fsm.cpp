@@ -13,6 +13,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_ = node;
   fp_.reset(new FSMParam);
   fd_.reset(new FSMData);
+  active_view_ = ActiveView();
 
   /* Initialize main modules */
   expl_manager_.reset(new ExplorationManager);
@@ -45,6 +46,22 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   confidence_threshold_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       "/detector/confidence_threshold", 10,
       std::bind(&ExplorationFSM::confidenceThresholdCallback, this, std::placeholders::_1));
+
+  inspection_ack_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/habitat/inspection_ack", 10);
+  inspection_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
+      "/habitat/inspection_request", 10,
+      [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+        if (!active_view_.set(msg->data)) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid inspection request");
+          return;
+        }
+        fd_->replan_flag_ = true;
+        fd_->dormant_frontier_flag_ = true;
+        fd_->final_result_ = FINAL_RESULT::EXPLORE;
+        std_msgs::msg::Int32 ack;
+        ack.data = active_view_.id;
+        inspection_ack_pub_->publish(ack);
+      });
 
   /* ROS2 Publisher */
   ros_state_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/ros/state", 10);
@@ -170,6 +187,10 @@ int ExplorationFSM::callActionPlanner()
   Eigen::Vector2d last_pos = Eigen::Vector2d(fd_->last_start_pos_(0), fd_->last_start_pos_(1));
   double current_yaw = fd_->start_yaw_(0);
   fd_->last_start_pos_ = fd_->start_pt_;
+
+  // Inspection is a bounded detour, never a REACH_OBJECT/STOP condition.
+  // With no request the original planner takes exactly the baseline path.
+  if (active_view_.id) return planInspection();
 
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
@@ -371,6 +392,63 @@ int ExplorationFSM::callActionPlanner()
         planNextBestAction(current_pos, current_yaw, expl_manager_->ed_->next_best_path_);
 
   return final_res;
+}
+
+int ExplorationFSM::planInspection()
+{
+  const Vector2d position(fd_->start_pt_(0), fd_->start_pt_(1));
+  auto map = expl_manager_->sdf_map_;
+  auto clear = [map](const Vector2d& p) {
+    return map->isInMap(p) && map->getOccupancy(p) != SDFMap2D::UNKNOWN &&
+        map->getOccupancy(p) != SDFMap2D::OCCUPIED;
+  };
+  auto safe = [map, clear](const Vector2d& p) {
+    return clear(p) && map->getInflateOccupancy(p) != 1;
+  };
+  auto route = [this, position](const Vector2d& goal, vector<Vector2d>& path) {
+    auto& astar = expl_manager_->path_finder_;
+    astar->reset();
+    if (astar->astarSearch(position, goal, 0.10, 0.05, Astar2D::SAFETY_MODE::NORMAL) !=
+        Astar2D::REACH_END) return false;
+    path = astar->getPath();
+    return true;
+  };
+  vector<Vector2d> path;
+  const bool was_locked = active_view_.locked;
+  if (!active_view_.plan(position, safe, clear, route, path)) {
+    fd_->newest_action_ = ACTION::INSPECTION_FAILED;
+    return FINAL_RESULT::EXPLORE;
+  }
+  if (!was_locked)
+    RCLCPP_INFO(node_->get_logger(), "[Active view] id=%d point=(%.3f, %.3f) radius=%.3f",
+        active_view_.id, active_view_.goal.x(), active_view_.goal.y(), active_view_.radius);
+  expl_manager_->ed_->next_pos_ = active_view_.goal;
+  expl_manager_->ed_->next_best_path_ = path;
+  if ((position - active_view_.goal).norm() <= 0.3125) {
+    if (!active_view_.visible(position, clear)) {
+      fd_->newest_action_ = ACTION::INSPECTION_FAILED;
+      return FINAL_RESULT::EXPLORE;
+    }
+    double yaw = std::atan2(active_view_.center.y() - position.y(),
+                           active_view_.center.x() - position.x());
+    double difference = yaw - fd_->start_yaw_(0);
+    wrapAngle(difference);
+    if (std::abs(difference) <= 18.0 * M_PI / 180.0)
+      fd_->newest_action_ = ACTION::INSPECT;
+    else
+      fd_->newest_action_ = difference > 0 ? ACTION::TURN_LEFT : ACTION::TURN_RIGHT;
+  } else {
+    fd_->newest_action_ = planNextBestAction(position, fd_->start_yaw_(0), path);
+    // Quantized execution follows the current heading, which can differ
+    // from the continuous path direction by half a turn increment.
+    if (fd_->newest_action_ == ACTION::MOVE_FORWARD) {
+      Vector2d end = position + 0.25 * Vector2d(
+          std::cos(fd_->start_yaw_(0)), std::sin(fd_->start_yaw_(0)));
+      if (!ActiveView::safePath({position, end}, safe))
+        fd_->newest_action_ = ACTION::INSPECTION_FAILED;
+    }
+  }
+  return FINAL_RESULT::EXPLORE;
 }
 
 int ExplorationFSM::planNextBestAction(

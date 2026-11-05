@@ -12,8 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, read_rows, resume_state, save_result,
+    record_episode_identity,
 )
 from run_batch import evaluation_command, stop_owned
+from compare_runs import compare
 
 
 class BatchTest(unittest.TestCase):
@@ -55,6 +57,10 @@ class BatchTest(unittest.TestCase):
             summary = json.loads((Path(directory) / "summary.json").read_text())
             self.assertTrue(summary["complete"])
             self.assertEqual(summary["success_rate"], 0.5)
+            self.assertEqual(summary["mean_steps"], 10)
+            self.assertEqual(summary["result_counts"], {"success": 25, "failure": 25})
+            self.assertEqual(len(list(Path(directory).glob("checkpoint-*.json"))), 5)
+            self.assertEqual((Path(directory) / "summary.json").stat().st_mode & 0o777, 0o644)
             with self.assertRaises(ValueError):
                 save_result(directory, self.row(50), 50)
 
@@ -67,6 +73,21 @@ class BatchTest(unittest.TestCase):
         self.assertFalse(any("max_episode_steps" in item for item in command))
         diagnostic = evaluation_command("hm3dv2", 1, Path("/tmp/diagnostic"), True, max_steps=3)
         self.assertIn("habitat.environment.max_episode_steps=3", diagnostic)
+        adaptive = evaluation_command("hm3dv2", 50, Path("/tmp/a"), False,
+                                      method="adaptive_view", seed=100)
+        self.assertIn("active_view.mode=adaptive_view", adaptive)
+        self.assertIn("habitat.seed=100", adaptive)
+        self.assertFalse(any("active_view" in item for item in command))
+
+    def test_episode_manifest_rejects_changed_order_and_gaps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            record_episode_identity(directory, 1, "a", "0", "chair")
+            record_episode_identity(directory, 1, "a", "0", "chair")
+            record_episode_identity(directory, 2, "a", "1", "bed")
+            with self.assertRaises(ValueError):
+                record_episode_identity(directory, 2, "b", "1", "bed")
+            with self.assertRaises(ValueError):
+                record_episode_identity(directory, 4, "a", "3", "bed")
 
     def test_stop_only_owned_worker(self):
         process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
@@ -79,6 +100,27 @@ class BatchTest(unittest.TestCase):
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+    def test_comparison_matches_prefix_and_rejects_mismatched_episodes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("baseline", "adaptive")]
+            for path, method in zip(paths, ("baseline", "adaptive_view")):
+                path.mkdir()
+                (path / "experiment.json").write_text(json.dumps({
+                    "method": method, "episodes": 50, "seed": 100, "dataset": "hm3dv2",
+                    "video": False, "llm_mode": "cached"}))
+                (path / "provenance.json").write_text(json.dumps({
+                    "code_sha": "example", "source_sha256": "same-source"}))
+                save_result(path, self.row(1), 50)
+            save_result(paths[0], self.row(2), 50)
+            report = compare(*paths)
+            self.assertEqual(report["paired_episodes"], 1)
+            self.assertFalse(report["complete"])
+            self.assertEqual(report["delta_treatment_minus_baseline"]["spl"], 0)
+            csv_path = paths[1] / "episodes.csv"
+            csv_path.write_text(csv_path.read_text().replace("scene-a", "scene-b"))
+            with self.assertRaises(ValueError):
+                compare(*paths)
 
     def test_streamed_video_is_readable_and_has_no_frame_list(self):
         import imageio.v2 as imageio

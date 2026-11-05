@@ -43,7 +43,7 @@ from geometry_msgs.msg import PoseStamped
 from omegaconf import DictConfig
 from prettytable import PrettyTable
 from sensor_msgs.msg import PointCloud2
-from std_msgs.msg import Int32, Int32MultiArray, Float32MultiArray, Float64
+from std_msgs.msg import Int32, Int32MultiArray, Float32MultiArray, Float64, Float64MultiArray
 import tqdm
 
 # Habitat-related imports
@@ -73,6 +73,7 @@ from basic_utils.record_episode.read_record import read_record
 from basic_utils.record_episode.write_record import write_record
 from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, resume_state, save_result,
+    record_episode_identity,
 )
 from habitat2ros.habitat_publisher import ROSPublisherNonNode
 from llm.answer_reader.answer_reader import read_answer
@@ -101,6 +102,12 @@ class HabitatEvalNode(Node):
         self.msg_observations = None
         self.fusion_threshold = 0.0
         self.pub_timer = None
+        self.inspection_ack = None
+        self.inspection_request = None
+        self.inspection_pub = self.create_publisher(
+            Float64MultiArray, "/habitat/inspection_request", qos)
+        self.create_subscription(
+            Int32, "/habitat/inspection_ack", self.inspection_ack_callback, qos)
 
         # Publishers
         self.obj_point_cloud_pub = self.create_publisher(
@@ -126,6 +133,24 @@ class HabitatEvalNode(Node):
 
     def ros_action_callback(self, msg):
         self.global_action = msg.data
+
+    def inspection_ack_callback(self, msg):
+        self.inspection_ack = msg.data
+
+    def request_inspection(self, data):
+        if self.inspection_request == data:
+            return
+        self.inspection_ack = None
+        msg = Float64MultiArray()
+        msg.data = data
+        self.inspection_pub.publish(msg)
+        expected = int(data[0]) if data else 0
+        deadline = time.monotonic() + 5
+        while self.inspection_ack != expected:
+            if not rclpy.ok() or time.monotonic() > deadline:
+                raise RuntimeError("Inspection planner handshake failed; rebuild the ROS workspace")
+            rclpy.spin_once(self, timeout_sec=0.05)
+        self.inspection_request = list(data)
 
     def ros_state_callback(self, msg):
         self.ros_state = msg.data
@@ -230,6 +255,10 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
     success_distance = cfg.habitat.task.measurements.success.success_distance
 
     detector_cfg = cfg.detector
+    view_cfg = cfg.get("active_view")
+    view_mode = view_cfg.mode if view_cfg else "baseline"
+    if view_mode not in ("baseline", "vlm", "fixed_view", "adaptive_view"):
+        raise ValueError(f"Unknown active_view mode: {view_mode}")
 
     llm_cfg = cfg.llm
     llm_client = llm_cfg.llm_client
@@ -318,6 +347,20 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         node.msg_observations = deepcopy(observations)
         del observations["camera_pitch"]
         label = detector_category(env.current_episode.object_category)
+        record_episode_identity(video_output_path, num_total + 1,
+                                env.current_episode.scene_id,
+                                env.current_episode.episode_id, label)
+        view = None
+        if view_mode != "baseline":
+            from vlm.active_view import ActiveViewVerifier
+            from vlm.utils.get_itm_message import itmclient
+
+            view = ActiveViewVerifier(
+                view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
+                label.split("|")[0].strip(), itmclient.itm_score,
+                video_output_path, num_total + 1)
+            node.inspection_request = None
+        latest_detection = None
 
         # Get LLM answer and fusion threshold for the target object
         llm_answer, room, node.fusion_threshold = read_answer(
@@ -381,6 +424,23 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 if count_steps == max_episode_steps - 1:
                     node.global_action = ACTION.STOP
 
+                if view is not None and node.global_action in (ACTION.INSPECT, ACTION.INSPECTION_FAILED):
+                    reachable = node.global_action == ACTION.INSPECT
+                    node.global_action = None
+                    view.finish_inspection(reachable)
+                    node.request_inspection([])
+                    if latest_detection is not None:
+                        scores, labels, clouds = latest_detection
+                        keep = view.accepted_indices()
+                        cld_with_score_msg.point_clouds = [clouds[i] for i in keep]
+                        cld_with_score_msg.confidence_scores = [scores[i] for i in keep]
+                        cld_with_score_msg.label_indices = [labels[i] for i in keep]
+                        node.cld_with_score_pub.publish(cld_with_score_msg)
+                    # Reuses the last real observation, without a free sensor
+                    # step or an artificial Habitat STOP/no-op.
+                    node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
+                    continue
+
                 if node.global_action == ACTION.MOVE_FORWARD:
                     action = HabitatSimActions.move_forward
                 elif node.global_action == ACTION.TURN_LEFT:
@@ -409,6 +469,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_EXEC)
 
             observations = env.step(action)
+            raw_rgb = observations["rgb"] if view is not None else None
 
             # Calculate ITM cosine similarity score
             cosine = get_itm_message_cosine(observations["rgb"], label, room)
@@ -432,6 +493,15 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             obj_point_cloud_list = get_object_point_cloud(
                 cfg, observations, object_masks_list, node
             )
+            if view is not None:
+                keep = view.update(
+                    raw_rgb, observations, object_masks_list, score_list, label_list,
+                    camera_pitch, count_steps)
+                latest_detection = (score_list, label_list, obj_point_cloud_list)
+                node.request_inspection(view.request())
+                obj_point_cloud_list = [obj_point_cloud_list[i] for i in keep]
+                score_list = [score_list[i] for i in keep]
+                label_list = [label_list[i] for i in keep]
 
             # Publish detection-related information
             cld_with_score_msg.point_clouds = obj_point_cloud_list
@@ -460,6 +530,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
 
         # Notify ROS system that current episode evaluation is complete
+        if view is not None:
+            view.finish_episode()
         node.publish_int32(node.state_pub, HABITAT_STATE.EPISODE_FINISH)
 
         # Wait for FSM to process EPISODE_FINISH and reset to INIT state

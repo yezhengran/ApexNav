@@ -1,6 +1,7 @@
 """Small, machine-readable experiment records and constant-memory video output."""
 
 import csv
+from collections import Counter
 import json
 import os
 from pathlib import Path
@@ -64,6 +65,7 @@ def save_result(directory, row, requested_episodes):
         writer = csv.DictWriter(stream, fieldnames=FIELDS)
         writer.writeheader()
         writer.writerows(rows)
+    temporary.chmod(0o644)
     os.replace(temporary, directory / "episodes.csv")
     count = len(rows)
     summary = {
@@ -75,6 +77,9 @@ def save_result(directory, row, requested_episodes):
         "mean_distance_to_goal_m": sum(float(r["distance_to_goal"]) for r in rows) / count,
         "elapsed_seconds": float(rows[-1]["cumulative_seconds"]),
         "scenes_completed": len({r["scene_id"] for r in rows}),
+        "mean_steps": sum(int(r["steps"]) for r in rows) / count,
+        "mean_episode_seconds": sum(float(r["elapsed_seconds"]) for r in rows) / count,
+        "result_counts": dict(Counter(r["result"] for r in rows)),
         "complete": count >= requested_episodes,
     }
     with tempfile.NamedTemporaryFile(mode="w", dir=directory, encoding="utf-8",
@@ -82,7 +87,32 @@ def save_result(directory, row, requested_episodes):
         temporary = Path(stream.name)
         json.dump(summary, stream, indent=2)
         stream.write("\n")
+    temporary.chmod(0o644)
     os.replace(temporary, directory / "summary.json")
+    if count % 10 == 0 or count == requested_episodes:
+        (directory / f"checkpoint-{count:04d}.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
+def record_episode_identity(directory, number, scene, episode, target):
+    """Append actual iterator order before execution; verify identity on retry."""
+    path = Path(directory) / "episode_set.json"
+    entries = json.loads(path.read_text()) if path.exists() else []
+    entry = {"scene_id": scene, "episode_id": str(episode), "target": target}
+    if number <= len(entries):
+        if entries[number - 1] != entry:
+            raise ValueError("Episode order changed; refusing to mix a different evaluation set")
+        return
+    if number != len(entries) + 1:
+        raise ValueError("Episode manifest is not contiguous; start a new experiment")
+    entries.append(entry)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, encoding="utf-8",
+                                     delete=False) as stream:
+        temporary = Path(stream.name)
+        json.dump(entries, stream, indent=2)
+        stream.write("\n")
+    temporary.chmod(0o644)
+    os.replace(temporary, path)
 
 
 class EpisodeVideo:

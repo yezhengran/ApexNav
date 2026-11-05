@@ -18,6 +18,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
+#include <exploration_manager/active_view.h>
 #include <visualization_msgs/msg/marker.hpp>
 
 using Eigen::Vector2d;
@@ -72,7 +74,8 @@ struct FSMParam;
 struct FSMData;
 
 enum ROS_STATE { INIT, WAIT_TRIGGER, PLAN_ACTION, WAIT_ACTION_FINISH, PUB_ACTION, FINISH };
-enum ACTION { STOP, MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, TURN_DOWN, TURN_UP };
+enum ACTION { STOP, MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, TURN_DOWN, TURN_UP,
+              INSPECT, INSPECTION_FAILED };
 enum HABITAT_STATE { READY, ACTION_EXEC, ACTION_FINISH, EPISODE_FINISH };
 
 class ExplorationFSM {
@@ -93,6 +96,9 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr habitat_state_sub_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr confidence_threshold_sub_;
+  rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr inspection_sub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
+  ActiveView active_view_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr ros_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr expl_state_pub_;
@@ -101,6 +107,7 @@ private:
 
   /* Action Planner */
   int callActionPlanner();
+  int planInspection();
   int planNextBestAction(Vector2d current_pos, double current_yaw, const vector<Vector2d>& path,
       bool need_safety = true);
   Vector2d selectLocalTarget(
