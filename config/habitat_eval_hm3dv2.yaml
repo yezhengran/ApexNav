@@ -64,10 +64,9 @@ test_epi_num: -1
 
 # Opt-in DynZSON-inspired experiment; baseline never constructs this controller.
 active_view:
-  mode: baseline  # baseline, vlm, fixed_view, adaptive_view
-  itm_threshold: 0.65
-  association_distance: 0.75
-  max_candidates: 64
-  start_step: 26
+  mode: baseline  # baseline, selected_review
+  itm_confirm_threshold: 0.65
+  itm_reject_threshold: 0.20
+  uncertain_after_steps: 350
   max_inspection_steps: 48
   max_stationary_steps: 24

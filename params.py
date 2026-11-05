@@ -24,6 +24,7 @@ class ACTION:
     # Internal planner/evaluator handshakes, not Habitat sensor/physics steps.
     INSPECT = 6
     INSPECTION_FAILED = 7
+    REVIEW_TARGET = 8
 
 
 RESULT_TYPES = [

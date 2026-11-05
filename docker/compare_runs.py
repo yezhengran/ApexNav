@@ -38,7 +38,8 @@ def compare(baseline, method):
         "paired_episodes": count, "requested_episodes": specs[0]["episodes"],
         "complete": all(len(run) == specs[0]["episodes"] for run in rows),
         "diagnostic_step_cap": specs[0].get("max_steps"),
-        "method": specs[1]["method"], "baseline": averages[0], "treatment": averages[1],
+        "method": specs[1]["method"], "review_settings": specs[1].get("review"),
+        "baseline": averages[0], "treatment": averages[1],
         "delta_treatment_minus_baseline": {k: averages[1][k] - averages[0][k] for k in metrics},
         "result_counts": [dict(Counter(row["result"] for row in run[:count])) for run in rows],
         "changed_outcomes": [

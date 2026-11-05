@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <set>
+#include <stdexcept>
 
 // ROS2 core
 #include <rclcpp/rclcpp.hpp>
@@ -18,6 +20,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <exploration_manager/active_view.h>
 #include <visualization_msgs/msg/marker.hpp>
@@ -75,7 +78,7 @@ struct FSMData;
 
 enum ROS_STATE { INIT, WAIT_TRIGGER, PLAN_ACTION, WAIT_ACTION_FINISH, PUB_ACTION, FINISH };
 enum ACTION { STOP, MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, TURN_DOWN, TURN_UP,
-              INSPECT, INSPECTION_FAILED };
+              INSPECT, INSPECTION_FAILED, REVIEW_TARGET };
 enum HABITAT_STATE { READY, ACTION_EXEC, ACTION_FINISH, EPISODE_FINISH };
 
 class ExplorationFSM {
@@ -99,6 +102,15 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr inspection_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
+  bool review_enabled_ = false, review_replan_ = false;
+  int review_late_step_ = 350, review_step_ = 0, review_pending_id_ = -1, review_episode_ = 0;
+  int review_pending_selection_ = -1;
+  Vector2d review_resume_pos_ = Vector2d::Zero();
+  vector<Vector2d> review_resume_path_;
+  std::set<int> review_fallback_logged_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr review_target_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr review_ack_pub_;
+  rclcpp::Subscription<std_msgs::msg::Int32MultiArray>::SharedPtr review_result_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr action_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr ros_state_pub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr expl_state_pub_;
@@ -108,6 +120,7 @@ private:
   /* Action Planner */
   int callActionPlanner();
   int planInspection();
+  bool maybeReviewSelected(int exploration_result);
   int planNextBestAction(Vector2d current_pos, double current_yaw, const vector<Vector2d>& path,
       bool need_safety = true);
   Vector2d selectLocalTarget(

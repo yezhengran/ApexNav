@@ -38,7 +38,8 @@ def stop_owned(process):
 
 
 def evaluation_command(dataset, episodes, output, video, max_steps=None,
-                       method="baseline", seed=100):
+                       method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
+                       uncertain_after_steps=350):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         "test_epi_num=-1", f"+max_episodes={episodes}",
@@ -47,7 +48,10 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         f"habitat.seed={seed}",
     ]
     if method != "baseline":
-        command.append(f"active_view.mode={method}")
+        command.extend([f"active_view.mode={method}",
+                        f"active_view.itm_confirm_threshold={confirm_threshold}",
+                        f"active_view.itm_reject_threshold={reject_threshold}",
+                        f"active_view.uncertain_after_steps={uncertain_after_steps}"])
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
@@ -83,10 +87,17 @@ def main():
     parser.add_argument("--output", help="New experiment directory inside outputs/runs")
     parser.add_argument("--resume", action="store_true", help="Continue the same --output directory")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
-    parser.add_argument("--method", choices=["baseline", "vlm", "fixed_view", "adaptive_view"],
+    parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
+    parser.add_argument("--confirm-threshold", type=float, default=0.65)
+    parser.add_argument("--reject-threshold", type=float, default=0.20)
+    parser.add_argument("--uncertain-after-steps", type=int, default=350)
     args = parser.parse_args()
+    if not 0 <= args.reject_threshold < args.confirm_threshold <= 1:
+        parser.error("Require 0 <= reject-threshold < confirm-threshold <= 1")
+    if args.uncertain_after_steps < 1:
+        parser.error("--uncertain-after-steps must be positive")
     if args.episodes < 1:
         parser.error("--episodes must be positive")
     if args.max_steps is not None and args.max_steps < 1:
@@ -101,10 +112,15 @@ def main():
     if not output.is_relative_to(ROOT / "outputs/runs") or output == ROOT / "outputs/runs":
         parser.error("--output must name a directory below outputs/runs")
     command = evaluation_command(args.dataset, args.episodes, output, args.video, args.max_steps,
-                                 args.method, args.seed)
+                                 args.method, args.seed, args.confirm_threshold,
+                                 args.reject_threshold, args.uncertain_after_steps)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
+    if args.method != "baseline":
+        spec["review"] = {"confirm_threshold": args.confirm_threshold,
+                          "reject_threshold": args.reject_threshold,
+                          "uncertain_after_steps": args.uncertain_after_steps}
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
     if args.dry_run:
@@ -161,7 +177,9 @@ def main():
         try:
             with (output / "planner.log").open("a") as log:
                 planner = subprocess.Popen(
-                    ["ros2", "launch", "exploration_manager", "exploration.launch.py"],
+                    ["ros2", "launch", "exploration_manager", "exploration.launch.py",
+                     f"review_enabled:={str(args.method == 'selected_review').lower()}",
+                     f"review_late_step:={args.uncertain_after_steps}"],
                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                 )
             time.sleep(3)

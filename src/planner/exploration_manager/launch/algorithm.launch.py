@@ -18,6 +18,9 @@ def generate_launch_description():
     trajectory_manager_share = get_package_share_directory('trajectory_manager')
     lkh_mtsp_solver_share = get_package_share_directory('lkh_mtsp_solver')
 
+    review_enabled_arg = DeclareLaunchArgument('review_enabled_', default_value='false')
+    review_late_step_arg = DeclareLaunchArgument('review_late_step_', default_value='350')
+
     # Declare launch arguments
     map_size_x_arg = DeclareLaunchArgument('map_size_x_', default_value='80.0')
     map_size_y_arg = DeclareLaunchArgument('map_size_y_', default_value='80.0')
@@ -50,6 +53,8 @@ def generate_launch_description():
             {
                 # FSM mode selection
                 'is_real_world': LaunchConfiguration('is_real_world_'),
+                'review.enabled': LaunchConfiguration('review_enabled_'),
+                'review.late_step': LaunchConfiguration('review_late_step_'),
 
                 # Mapping - SDF Map (C++ uses dots)
                 'sdf_map.ray_mode': 0,
@@ -142,6 +147,8 @@ def generate_launch_description():
         fx_arg,
         fy_arg,
         is_real_world_arg,
+        review_enabled_arg,
+        review_late_step_arg,
         # Nodes
         exploration_node,
         tsp_solver_node,

@@ -74,8 +74,12 @@ class BatchTest(unittest.TestCase):
         diagnostic = evaluation_command("hm3dv2", 1, Path("/tmp/diagnostic"), True, max_steps=3)
         self.assertIn("habitat.environment.max_episode_steps=3", diagnostic)
         adaptive = evaluation_command("hm3dv2", 50, Path("/tmp/a"), False,
-                                      method="adaptive_view", seed=100)
-        self.assertIn("active_view.mode=adaptive_view", adaptive)
+                                      method="selected_review", seed=100, confirm_threshold=0.55,
+                                      reject_threshold=0.10, uncertain_after_steps=400)
+        self.assertIn("active_view.mode=selected_review", adaptive)
+        self.assertIn("active_view.itm_confirm_threshold=0.55", adaptive)
+        self.assertIn("active_view.itm_reject_threshold=0.1", adaptive)
+        self.assertIn("active_view.uncertain_after_steps=400", adaptive)
         self.assertIn("habitat.seed=100", adaptive)
         self.assertFalse(any("active_view" in item for item in command))
 

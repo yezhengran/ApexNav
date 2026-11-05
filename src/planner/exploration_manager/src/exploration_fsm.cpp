@@ -14,6 +14,20 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   fp_.reset(new FSMParam);
   fd_.reset(new FSMData);
   active_view_ = ActiveView();
+  if (first_init) {
+    node_->declare_parameter("review.enabled", false);
+    node_->declare_parameter("review.late_step", 350);
+  }
+  node_->get_parameter("review.enabled", review_enabled_);
+  node_->get_parameter("review.late_step", review_late_step_);
+  if (review_late_step_ < 1) throw std::invalid_argument("review.late_step must be positive");
+  review_step_ = 0;
+  review_replan_ = false;
+  review_pending_id_ = -1;
+  review_pending_selection_ = -1;
+  ++review_episode_;
+  review_resume_path_.clear();
+  review_fallback_logged_.clear();
 
   /* Initialize main modules */
   expl_manager_.reset(new ExplorationManager);
@@ -51,17 +65,50 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   inspection_sub_ = node_->create_subscription<std_msgs::msg::Float64MultiArray>(
       "/habitat/inspection_request", 10,
       [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-        if (!active_view_.set(msg->data)) {
-          RCLCPP_ERROR(node_->get_logger(), "Invalid inspection request");
+        if (!review_enabled_ || review_pending_id_ < 0 ||
+            (!msg->data.empty() && msg->data[0] != review_pending_id_ + 1) ||
+            !active_view_.set(msg->data)) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target inspection request");
           return;
         }
-        fd_->replan_flag_ = true;
-        expl_manager_->verified_targets_only_ = true;
-        fd_->dormant_frontier_flag_ = true;
-        fd_->final_result_ = FINAL_RESULT::EXPLORE;
         std_msgs::msg::Int32 ack;
         ack.data = active_view_.id;
         inspection_ack_pub_->publish(ack);
+      });
+  review_target_pub_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+      "/habitat/review_target", 10);
+  review_ack_pub_ = node_->create_publisher<std_msgs::msg::Int32>("/habitat/review_ack", 10);
+  review_result_sub_ = node_->create_subscription<std_msgs::msg::Int32MultiArray>(
+      "/habitat/review_result", 10,
+      [this](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
+        if (!review_enabled_ || msg->data.size() != 2 || review_pending_id_ < 0 ||
+            msg->data[0] != review_pending_id_ + 1 ||
+            !expl_manager_->object_map2d_->setReviewState(review_pending_id_, msg->data[1])) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review result");
+          return;
+        }
+        RCLCPP_INFO(node_->get_logger(), "[Review decision] episode=%d id=%d state=%d step=%d",
+            review_episode_, msg->data[0], msg->data[1], review_step_);
+        active_view_ = ActiveView();
+        expl_manager_->ed_->next_pos_ = review_resume_pos_;
+        expl_manager_->ed_->next_best_path_ = review_resume_path_;
+        const bool fallback = review_step_ >= review_late_step_ ||
+            review_pending_selection_ == EXPL_RESULT::SEARCH_SUSPICIOUS_OBJECT ||
+            review_pending_selection_ == EXPL_RESULT::SEARCH_EXTREME;
+        if (msg->data[1] == ObjectMap2D::UNCERTAIN && fallback &&
+            review_fallback_logged_.insert(review_pending_id_).second)
+          RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
+              review_episode_, msg->data[0],
+              review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
+        fd_->final_result_ = (msg->data[1] == ObjectMap2D::CONFIRMED ||
+            (msg->data[1] == ObjectMap2D::UNCERTAIN && fallback)) ?
+            FINAL_RESULT::SEARCH_OBJECT : FINAL_RESULT::EXPLORE;
+        fd_->replan_flag_ = true;
+        review_replan_ = true;  // A revoked target must not reuse its old route.
+        std_msgs::msg::Int32 ack;
+        ack.data = msg->data[0];
+        review_pending_id_ = -1;
+        review_ack_pub_->publish(ack);
       });
 
   /* ROS2 Publisher */
@@ -294,7 +341,7 @@ int ExplorationFSM::callActionPlanner()
     fd_->replan_flag_ = true;
     fd_->dormant_frontier_flag_ = false;
   }
-  else if (fd_->final_result_ == FINAL_RESULT::EXPLORE && !frontier_change_flag)
+  else if (fd_->final_result_ == FINAL_RESULT::EXPLORE && !frontier_change_flag && !review_replan_)
     fd_->replan_flag_ = false;
 
   expl_res = expl_manager_->planNextBestPoint(fd_->start_pt_, fd_->start_yaw_(0));
@@ -307,6 +354,7 @@ int ExplorationFSM::callActionPlanner()
     expl_manager_->ed_->next_pos_ = last_next_pos;
     fd_->replan_flag_ = true;
   }
+  review_replan_ = false;
   /*******  Decide whether to replan path (stability heuristic) END *******/
 
   // Publish exploration result to monitor
@@ -327,6 +375,9 @@ int ExplorationFSM::callActionPlanner()
     RCLCPP_WARN(node_->get_logger(), "No (passable) frontier");
     return final_res;
   }
+
+  if (review_enabled_ && maybeReviewSelected(expl_res))
+    return FINAL_RESULT::SEARCH_OBJECT;
 
   Eigen::Vector2d end_pos = expl_manager_->ed_->next_pos_;
   Eigen::Vector2d last_end_pos = fd_->last_next_pos_;
@@ -393,6 +444,41 @@ int ExplorationFSM::callActionPlanner()
         planNextBestAction(current_pos, current_yaw, expl_manager_->ed_->next_best_path_);
 
   return final_res;
+}
+
+bool ExplorationFSM::maybeReviewSelected(int exploration_result)
+{
+  const int id = expl_manager_->ed_->selected_object_id_;
+  vector<double> data;
+  auto& objects = expl_manager_->object_map2d_;
+  if (!objects->reviewInfo(id, data)) {
+    if (exploration_result != EXPL_RESULT::EXPLORATION)
+      RCLCPP_INFO(node_->get_logger(),
+          "[Review bypass] episode=%d reason=missing_object_metadata selection=%d step=%d",
+          review_episode_, exploration_result, review_step_);
+    return false;
+  }
+  // High-confidence selection retains the complete original path.
+  if (data[1] >= data[2]) return false;
+  const int status = objects->reviewState(id);
+  if (status == ObjectMap2D::UNCERTAIN && review_fallback_logged_.insert(id).second) {
+    RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
+        review_episode_, id + 1,
+        review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
+  }
+  if (status != ObjectMap2D::UNREVIEWED) return false;
+  review_pending_id_ = id;
+  review_pending_selection_ = exploration_result;
+  review_resume_pos_ = expl_manager_->ed_->next_pos_;
+  review_resume_path_ = expl_manager_->ed_->next_best_path_;
+  std_msgs::msg::Float64MultiArray target;
+  target.data = data;
+  review_target_pub_->publish(target);
+  fd_->newest_action_ = ACTION::REVIEW_TARGET;
+  RCLCPP_INFO(node_->get_logger(),
+      "[Review selected] episode=%d id=%d confidence=%.4f threshold=%.4f step=%d",
+      review_episode_, id + 1, data[1], data[2], review_step_);
+  return true;
 }
 
 int ExplorationFSM::planInspection()
@@ -688,6 +774,10 @@ bool ExplorationFSM::updateFrontierAndObject()
 // Receive Habitat state messages
 void ExplorationFSM::habitatStateCallback(const std_msgs::msg::Int32::SharedPtr msg)
 {
+  if (review_enabled_ && msg->data == HABITAT_STATE::ACTION_EXEC) {
+    ++review_step_;  // Only real Habitat actions; review handshakes never count.
+    expl_manager_->object_map2d_->setLateReviewEligibility(review_step_ >= review_late_step_);
+  }
   if (msg->data == HABITAT_STATE::ACTION_FINISH && state_ == ROS_STATE::WAIT_ACTION_FINISH)
     transitState(PLAN_ACTION, "Habitat Finish Action");
   if (msg->data == HABITAT_STATE::EPISODE_FINISH)

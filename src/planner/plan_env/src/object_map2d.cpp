@@ -570,16 +570,18 @@ void ObjectMap2D::getAllConfidenceObjectClouds(
 
 void ObjectMap2D::getTopConfidenceObjectCloud(
     vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>>& top_object_clouds,
-    bool limited_confidence, bool extreme)
+    bool limited_confidence, bool extreme, vector<int>* object_ids)
 {
   top_object_clouds.clear();
+  if (object_ids) object_ids->clear();
   vector<ObjectCluster> top_objects;
 
   // Confidence filtering strategy
   // TODO: May need logic adjustment for relaxed no limited_confidence conditions
   if (!limited_confidence) {
     // Include all objects without confidence filtering
-    for (auto object : objects_) top_objects.push_back(object);
+    for (auto object : objects_)
+      if (reviewState(object.id_) != REJECTED) top_objects.push_back(object);
 
     // Sort by confidence score in descending order
     std::sort(
@@ -603,6 +605,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
         top_object_cloud->push_back(point);
       }
       top_object_clouds.push_back(top_object_cloud);
+      if (object_ids) object_ids->push_back(top_obj.id_);
     }
 
     // Fallback for extreme mode when no high-confidence objects exist
@@ -612,6 +615,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
 
       // Include all object cells regardless of confidence
       for (auto object : objects_) {
+        if (reviewState(object.id_) == REJECTED) continue;
         for (auto cell : object.cells_) {
           pcl::PointXYZ point;
           point.x = cell(0);
@@ -621,11 +625,13 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
         }
       }
       top_object_clouds.push_back(others_object_cloud);
+      if (object_ids) object_ids->push_back(-1);  // Combined fallback has no single ID.
     }
   }
   else {
     // Apply confidence filtering with functional scoring
     for (auto object : objects_) {
+      if (reviewState(object.id_) == REJECTED) continue;
       int max_func_score = 0, best_label = -1;
 
       // Find best label using functional score (observation count * confidence)
@@ -640,7 +646,9 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
       }
 
       // Include only high-confidence objects with primary label (0)
-      if (best_label == 0 && isConfidenceObject(object))
+      const int review = reviewState(object.id_);
+      if ((best_label == 0 && isConfidenceObject(object)) || review == CONFIRMED ||
+          (review_late_eligible_ && review == UNCERTAIN))
         top_objects.push_back(object);
     }
 
@@ -662,8 +670,37 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
         top_object_cloud->push_back(point);
       }
       top_object_clouds.push_back(top_object_cloud);
+      if (object_ids) object_ids->push_back(top_obj.id_);
     }
   }
+}
+
+int ObjectMap2D::reviewState(int object_id) const
+{
+  const auto found = review_states_.find(object_id);
+  return found == review_states_.end() ? UNREVIEWED : found->second;
+}
+
+bool ObjectMap2D::setReviewState(int object_id, int state)
+{
+  if (object_id < 0 || object_id >= static_cast<int>(objects_.size()) ||
+      state < CONFIRMED || state > REJECTED) return false;
+  review_states_[object_id] = state;
+  return true;
+}
+
+bool ObjectMap2D::reviewInfo(int object_id, vector<double>& data) const
+{
+  data.clear();
+  if (object_id < 0 || object_id >= static_cast<int>(objects_.size())) return false;
+  const auto& object = objects_[object_id];
+  const Vector2d center = (object.box_min2d_ + object.box_max2d_) / 2.0;
+  const double extent = (object.box_max2d_ - object.box_min2d_).maxCoeff();
+  data = {static_cast<double>(object_id + 1), object.confidence_scores_[0], min_confidence_,
+          center.x(), center.y(), extent, object.box_min2d_.x(), object.box_min2d_.y(),
+          object.box_max2d_.x(), object.box_max2d_.y()};
+  for (double value : data) if (!std::isfinite(value)) { data.clear(); return false; }
+  return true;
 }
 
 bool ObjectMap2D::isConfidenceObject(const ObjectCluster& obj)

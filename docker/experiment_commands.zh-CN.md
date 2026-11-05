@@ -56,15 +56,18 @@ docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
 
 2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。工作区必须提交；续跑需保持这些设置一致。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
 
-尺寸自适应观测的正式对照在构建和短验证通过后顺序运行（细节见 [实验记录](../docs/experiments/2026-11-05-adaptive-view-plan.zh-CN.md)）：
+仅对原规划器选中目标复核的新方案，先跑同集 10 回合开发集；**至少 8/10 成功且不低于基线后才能扩到 50**。350/400 步分别使用独立目录，阈值修改也使用新目录（详见 [新方案](../docs/experiments/2026-11-05-selected-target-review-plan.zh-CN.md)）：
 
 ```bash
-./docker/apexnav run-batch hm3dv2 --episodes 50 --method baseline --seed 100 --video --output outputs/runs/av-baseline-50
-./docker/apexnav run-batch hm3dv2 --episodes 50 --method adaptive_view --seed 100 --video --output outputs/runs/av-adaptive-50
-python3 docker/compare_runs.py outputs/runs/av-baseline-50 outputs/runs/av-adaptive-50
+./docker/apexnav run-batch hm3dv2 --episodes 10 --method baseline --seed 100 --video --output outputs/runs/review-baseline-10
+./docker/apexnav run-batch hm3dv2 --episodes 10 --method selected_review --uncertain-after-steps 350 --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 --video --output outputs/runs/review-350-065-020-10
+./docker/apexnav run-batch hm3dv2 --episodes 10 --method selected_review --uncertain-after-steps 400 --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 --video --output outputs/runs/review-400-065-020-10
+python3 docker/compare_runs.py outputs/runs/review-baseline-10 outputs/runs/review-350-065-020-10
 ```
 
-消融设置为 `--method vlm`（只做历史确认）、`--method fixed_view`（固定边缘净距 0.90 m）。各组使用独立目录。每回合保存 summary/CSV，每 10 回合另存 checkpoint；不足 50 回合的比较会标记未完成。
+逐条顺序运行，不同时运行多份。每回合保存 summary/CSV，每 10 回合另存 checkpoint。旧 `vlm/fixed_view/adaptive_view` 属于范围过大的失败原型，已移除运行入口，历史记录与对应 Git 提交保留。新范围的额外观测保持一次有界尝试；当前还没有确认最佳阈值。50 回合包含开发集，不能称作未见测试集。
+
+C++ 构建前确认评测已停止，再用 `./docker/apexnav vlm-stop-local` 停止本次模型服务；编译结束再启动模型。不要同时运行四模型与双进程 C++ 编译，以免挤满主机 RAM。
 
 tmux：`Ctrl+B` 松开后按 `D` 离开但保持运行；`tmux ls` 查看；`tmux attach -t apexnav-next` 返回已有会话。
 不要在已有会话中重复启动实验。tmux 不能防止内存不足、重启或休眠。

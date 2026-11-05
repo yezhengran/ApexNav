@@ -121,6 +121,7 @@ struct ExplorationData {
     object_averages_.clear();
     object_labels_.clear();
     next_pos_ = Eigen::Vector2d(0, 0);
+    selected_object_id_ = -1;
     next_best_path_.clear();
     tsp_tour_.clear();
   }
@@ -129,6 +130,7 @@ struct ExplorationData {
   std::vector<std::vector<Eigen::Vector2d>> objects_;
   std::vector<Eigen::Vector2d> object_averages_;
   std::vector<int> object_labels_;
+  int selected_object_id_;  // Read-only identity of the original planner choice.
   Eigen::Vector2d next_pos_;
   Eigen::Vector2d next_local_pos_;  // Local target position along path
   std::vector<Eigen::Vector2d> next_best_path_;

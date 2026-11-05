@@ -114,7 +114,13 @@ public:
   void getAllConfidenceObjectClouds(pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& object_clouds);
   void getTopConfidenceObjectCloud(
       vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>>& top_object_clouds,
-      bool limited_confidence = true, bool extreme = false);
+      bool limited_confidence = true, bool extreme = false, vector<int>* object_ids = nullptr);
+  // Review state affects only goal eligibility, never stored observations/fusion.
+  enum ReviewState { UNREVIEWED = 0, CONFIRMED = 1, UNCERTAIN = 2, REJECTED = 3 };
+  int reviewState(int object_id) const;
+  bool setReviewState(int object_id, int state);
+  bool reviewInfo(int object_id, vector<double>& data) const;
+  void setLateReviewEligibility(bool enabled) { review_late_eligible_ = enabled; }
   void getObjects(
       vector<vector<Vector2d>>& clusters, vector<Vector2d>& averages, vector<int>& labels);
   void getObjectBoxes(vector<pair<Vector2d, Vector2d>>& boxes);
@@ -170,6 +176,8 @@ private:
   // Object storage and indexing
   vector<int> object_indexs_;      ///< Grid cell to object ID mapping
   vector<char> object_buffer_;     ///< Object occupancy grid buffer
+  std::unordered_map<int, int> review_states_;
+  bool review_late_eligible_ = false;
   vector<ObjectCluster> objects_;  ///< Collection of all object clusters
 
   // Algorithm parameters

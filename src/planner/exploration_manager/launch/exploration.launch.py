@@ -17,6 +17,9 @@ def generate_launch_description():
     # Get package share directory
     exploration_manager_share = get_package_share_directory('exploration_manager')
 
+    review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
+    review_late_step_arg = DeclareLaunchArgument('review_late_step', default_value='350')
+
     # Declare launch arguments
     map_size_x_arg = DeclareLaunchArgument(
         'map_size_x',
@@ -72,6 +75,8 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'is_real_world_': LaunchConfiguration('is_real_world'),
+            'review_enabled_': LaunchConfiguration('review_enabled'),
+            'review_late_step_': LaunchConfiguration('review_late_step'),
             'map_size_x_': LaunchConfiguration('map_size_x'),
             'map_size_y_': LaunchConfiguration('map_size_y'),
             'odometry_topic_': LaunchConfiguration('odom_topic'),
@@ -89,6 +94,8 @@ def generate_launch_description():
         map_size_x_arg,
         map_size_y_arg,
         is_real_world_arg,
+        review_enabled_arg,
+        review_late_step_arg,
         odom_topic_arg,
         sensor_pose_topic_arg,
         depth_topic_arg,

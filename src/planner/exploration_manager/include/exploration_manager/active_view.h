@@ -79,7 +79,8 @@ public:
     for (int i = 0; i < 24; ++i) {
       double angle = 2 * pi * i / 24;
       Eigen::Vector2d point = center + radius * Eigen::Vector2d(std::cos(angle), std::sin(angle));
-      if ((point - start).norm() < 0.30 || !safe(point) || !visible(point, clear)) continue;
+      // Require translation beyond the 0.3125 m arrival tolerance.
+      if ((point - start).norm() < 0.65 || !safe(point) || !visible(point, clear)) continue;
       int free = 0;
       for (int x = -5; x <= 5; ++x)
         for (int y = -5; y <= 5; ++y)
