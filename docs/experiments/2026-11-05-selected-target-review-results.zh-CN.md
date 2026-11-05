@@ -40,3 +40,19 @@
 **额外复核选中目标 0、VLM 调用 0、主动观测 0、额外观测动作 0。** 数量门槛已达到（9/10 且等于基线），但这组没有验证新增观测或 VLM 判定的有效性，也无法据此挑选最佳 BLIP2 阈值或步数门槛。全部逐回合指标、视频、检查点和配对 JSON 已保存，主机可读备份在 `experiment_notes/validation/20261105-adaptive-view/review-350-065-020-10/`。
 
 核查原选择阈值：bed=0.65、toilet/tv=0.45、chair=0.50、couch=0.60。原策略通常达到该门槛即走高置信度目标路径，导致按同一阈值复核的介入机会少。已按用户“方法改动先对齐”的要求询问：是否保留原探索/选择门槛，另设 0.75 的复核触发线（只作用于已选目标），再验证 10 回合；或保留现状继续已授权的 50 回合。此独立触发线尚未实现，等待用户选择。
+
+## 模型版本记录
+
+350/400 步组之间、没有评测运行时补录 SHA256；baseline 与这两组使用同一批持续运行的本地模型服务。只读取权重文件，不更换权重。BLIP2 使用 LAVIS `blip2_image_text_matching/pretrain`，视觉输入 224、EVA fp16。
+
+环境：torch=2.10.0+cu128、torchvision=0.25.0+cu128、numpy=1.26.4、salesforce-lavis=1.0.2、habitat-lab=0.3.3、habitat-sim=0.3.3。
+
+| 模型文件 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| yolov7-e6e.pt | 304425133 | `b370120a414bf32b5d65fc808e5a32c8d9b3c63902d1bc41894fc9d86eccf9cb` |
+| mobile_sam.pt | 40728226 | `6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f` |
+| groundingdino_swint_ogc.pth | 693997677 | `3b3ca2563c77c69f651d7bd133e97139c186df06231157a64c507099c52bc799` |
+| blip2_pretrained.pth | 746998955 | `f31f96e4a97ce9ac7a140ea1961b8a871822ae1cd0a23f0f1122fbefd70db9f0` |
+| eva_vit_g.pth | 2025249237 | `99d2bb36c6b52c94fe6e2e12373afb27de57ae81378c3d8c53bf0e83b0f4275f` |
+
+完整本地清单：`experiment_notes/validation/20261105-adaptive-view/model-weight-manifest.json` 与 `model-package-versions.json`。这里只提交版本元数据，权重及原始运行数据保留本地。
