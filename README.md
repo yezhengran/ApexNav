@@ -29,6 +29,10 @@
 
 ## About This Repository
 
+For the personal ObjectNav simulation-to-Tracer-Mini work, start with
+[`AGENTS.md`](AGENTS.md) and the [agent handoff](docs/OBJECTNAV_HANDOFF.zh-CN.md).
+The experiment branch is `codex/objectnav-sim-to-tracer-mini`.
+
 This is the **ROS2 Jazzy** port of [ApexNav](https://github.com/Robotics-STAR-Lab/ApexNav), originally built on ROS1 Noetic. The entire codebase has been migrated to work with **Ubuntu 24.04 + ROS2 Jazzy**.
 
 **ROS2 Jazzy support is now available thanks to the community contribution from [romaster93](https://github.com/romaster93).** Please note that this ROS2 port is community-maintained and is not the official paper release.
@@ -185,10 +189,11 @@ source install/setup.bash
 ```
 
 ### Run VLMs Servers
-For an 8 GB laptop GPU, use the configurable remote API workflow in
-[`docker/README.md`](docker/README.md#remote-vlm-apis-recommended-on-the-8-gb-laptop-gpu).
-Set the four URLs in `config/vlm.env` and run `docker/apexnav vlm-check`;
-Habitat/ROS then runs locally without starting the local model servers below.
+The current laptop deployment uses all four local services; see
+[`docker/README.md`](docker/README.md#all-local-vision-services-current-deployment)
+for the measured memory limits and startup commands. Individual services can
+also use remote endpoints configured in `config/vlm.env`; validate them with
+`docker/apexnav vlm-check` before evaluation.
 
 Each command should be run in a separate terminal.
 ``` bash
