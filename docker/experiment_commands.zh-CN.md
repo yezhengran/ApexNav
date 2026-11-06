@@ -45,7 +45,7 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验（暂勿执行）**：2026-11-06 真实续跑触发 `Episode order changed`，已被清单保护拦截；修复并验证前不要使用 `--resume`，也不要手改清单绕过。下面保留历史命令供修复时核验。当前 100 回合已在新目录 `review-400-065-020-100-r2` 从头后台运行，勿重复启动。
+**续跑原实验（暂勿执行）**：2026-11-06 真实续跑触发 `Episode order changed`，已被清单保护拦截；修复并验证前不要使用 `--resume`，也不要手改清单绕过。下面保留历史命令供修复时核验。当前 `review-400-065-020-100-r2` 已按用户要求暂停，保留 66 个完整回合；模型和自动跟进均已停止。用户明确要求继续后，先验证续跑工具修复和版本记录，再从第 67 回合开头继续，前 66 回合不重跑。详见 [暂停交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)。
 
 ```bash
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video \
