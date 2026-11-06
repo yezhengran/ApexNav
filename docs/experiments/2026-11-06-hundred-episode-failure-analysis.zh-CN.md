@@ -61,6 +61,19 @@
 - 历史 baseline-50 与 review-50 的相同前 10 回合都为 10/10，上述 chair 回合分别在 446/440 步成功。本轮是相同方法的重复测量，当前差异不能归因于未触发的复核，也不能把历史 50 回合当成完整 100 回合基线。按用户明确授权继续固定 100 回合，中途不调参。
 - 已核验实际 episode 顺序与预先清单一致、CSV 连续且唯一、已完成视频非空、checkpoint 指标与前 10 行 CSV 一致，运行源码指纹未变。备份目录 `experiment_notes/validation/20261106-hundred/review-400-065-020-100-r2/` 保存 `checkpoint-0010.json`、`validation-through-0010.json`、`verification-totals-through-0010.json`、`failures-through-0010.json`、`by-category-through-0010.json`、`historical-prefix-through-0010.json` 及完整配置/部分结果。没有新增临时测试代码。
 
+### 正式批次 20 回合检查点（2026-11-06 14:45 核验）
+
+| 已完成 / 目标 | 成功数 | SR | SPL | Soft SPL | 平均步数 | 平均回合耗时 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 / 100 | 17 | 85.00% | 53.64% | 53.68% | 212.7 | 278.10 s |
+
+平均目标距离 0.7941 m；累计耗时 5566.08 s。仅覆盖首个场景 ID 0–19；类别成功数为 bed 3/3、chair 4/5、couch 3/3、toilet 3/5、tv 4/4。核验时已完成 21 回合（18 成功），第 22 回合进行中；唯一评测及规划器仍在运行，RAM 可用约 2.0 GiB。
+
+- 20 回合额外复核、VLM 调用、确认/不确定/否定和自适应观测动作仍全部为 0，尚不能计算 VLM 复核判定准确率。
+- 除第 4 回合 chair 失败外，新增第 14/16 回合（episode ID 13/15，均为 toilet）500 步超时，终点距离分别为 2.8981/2.2999 m，均为 `stepout feasible`，即本轮未进入成功距离。已保存三个失败的终帧、规划器日志尾部和逐回合证据；具体原因待完整视频/日志分析，不将超时直接视作识别错误。
+- 核验相同前缀后，历史 baseline-50 前 20 回合为 20/20，review-50 为 19/20。本次第 4/14/16 回合在两份历史记录中都成功；本次第 11 回合则由历史 review 的失败变为成功。该差异不能归因于未触发的复核，历史前缀也不是完整 100 回合基线。
+- 已核验当前 21 行 CSV 连续且唯一、实际清单 22 项与预先顺序匹配、已完成视频非空、检查点指标与前 20 行 CSV 一致、每回合复核汇总完整，运行源码指纹未变。备份保存 `checkpoint-0020.json`、`validation-through-0020.json`、`verification-totals-through-0020.json`、`failures-through-0020.json`、`by-category-through-0020.json`、`historical-prefix-through-0020.json` 及配置/部分结果。继续既定 100 回合，中途不改方法，无新增临时测试代码。
+
 ### 旧 50 回合的离线线索（不计入新成绩）
 
 - 场景 `5cdEh9F2hJL` 的语义文件包含 `wall tv_231`、`monitor_353`、`monitor_354`、`wall tv_363`。任务 `goals_by_category` 的 `tv_monitor` 只包含 353/354。
