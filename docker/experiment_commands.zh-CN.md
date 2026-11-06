@@ -27,7 +27,7 @@ export APEX_RUN=hm3dv2-local-50
 
 ```bash
 ./docker/apexnav start
-docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
+docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)'
 ```
 
 有输出时先核对旧实验，勿重复启动；无匹配时无输出、返回 1 是正常的。确认没有其他评测，再启动模型：
@@ -45,7 +45,7 @@ docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验**：以下仅适用于由新启动器创建、带 provenance 的基线批次。总目标仍是 50 回合，已完成回合保留，未完成回合重试。
+**续跑原实验（暂勿执行）**：2026-11-06 真实续跑触发 `Episode order changed`，已被清单保护拦截；修复并验证前不要使用 `--resume`，也不要手改清单绕过。下面保留历史命令供修复时核验。当前 100 回合已在新目录 `review-400-065-020-100-r2` 从头后台运行，勿重复启动。
 
 ```bash
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video \
@@ -103,10 +103,10 @@ CPU 超过 100% 可表示使用多个核心；模型占显存不代表评测仍�
 原终端丢失时，先查看；**确认只有一个且就是要停止的批量实验后**，才执行中断命令：
 
 ```bash
-docker exec apexnav-jazzy-egl pgrep -af '^python docker/run_batch\.py( |$)'
+docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)'
 
 # 仅匹配批量启动器，不要改成 pkill python
-docker exec apexnav-jazzy-egl pkill -INT -f '^python docker/run_batch\.py( |$)'
+docker exec apexnav-jazzy-egl pkill -INT -f '^python( -u)? docker/run_batch\.py( |$)'
 ```
 
 等待几十秒，再检查状态和进程：
