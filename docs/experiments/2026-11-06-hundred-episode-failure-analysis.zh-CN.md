@@ -48,6 +48,19 @@
 
 续跑顺序问题列为独立的评测工具缺陷，在本轮冻结评测结束后修复并验证真实续跑，不与算法改动混在一起。
 
+### 正式批次 10 回合检查点（2026-11-06 13:45 核验）
+
+| 已完成 / 目标 | 成功数 | SR | SPL | Soft SPL | 平均步数 | 平均回合耗时 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 / 100 | 9 | 90.00% | 59.90% | 60.00% | 162.8 | 218.66 s |
+
+平均目标距离 1.0307 m；累计耗时 2189.66 s。仅覆盖首个场景 `4ok3usBNeis` 的 ID 0–9，不是完整 100 回合成绩。核验时已完成 11 回合、成功 10 次，第 12 回合进行中；后台只有一份评测，RAM 可用约 2.1 GiB。
+
+- 10 个已完成回合的额外复核、VLM 调用、确认/不确定/否定和自适应观测动作均为 0，不能用本阶段成绩证明复核有效或计算其判定准确率。
+- 唯一失败为第 4 回合（scene ID `4ok3usBNeis` / episode ID `3`，chair）：107 步，终点距目标 9.9964 m，结果 `no frontier`。日志显示反复 `Still stuck at the same place`，两次 `Set dormant frontier` 后报告无可通行前沿。暂归为受阻后前沿耗尽，不能直接归因于视觉漏检；已保存视频终帧、规划器尾部及证据 JSON。
+- 历史 baseline-50 与 review-50 的相同前 10 回合都为 10/10，上述 chair 回合分别在 446/440 步成功。本轮是相同方法的重复测量，当前差异不能归因于未触发的复核，也不能把历史 50 回合当成完整 100 回合基线。按用户明确授权继续固定 100 回合，中途不调参。
+- 已核验实际 episode 顺序与预先清单一致、CSV 连续且唯一、已完成视频非空、checkpoint 指标与前 10 行 CSV 一致，运行源码指纹未变。备份目录 `experiment_notes/validation/20261106-hundred/review-400-065-020-100-r2/` 保存 `checkpoint-0010.json`、`validation-through-0010.json`、`verification-totals-through-0010.json`、`failures-through-0010.json`、`by-category-through-0010.json`、`historical-prefix-through-0010.json` 及完整配置/部分结果。没有新增临时测试代码。
+
 ### 旧 50 回合的离线线索（不计入新成绩）
 
 - 场景 `5cdEh9F2hJL` 的语义文件包含 `wall tv_231`、`monitor_353`、`monitor_354`、`wall tv_363`。任务 `goals_by_category` 的 `tv_monitor` 只包含 353/354。
