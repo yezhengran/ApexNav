@@ -77,6 +77,21 @@ def source_provenance():
     return {"code_sha": revision, "source_sha256": digest.hexdigest()}
 
 
+def resume_migration(old, current, name=None):
+    """Only permit an explicitly reviewed, exact source fingerprint pair."""
+    if name is None:
+        if old["source_sha256"] != current["source_sha256"]:
+            raise RuntimeError("Runtime source changed; start a separate experiment or use "
+                               "an explicitly reviewed --resume-migration")
+        return None
+    registry = json.loads((ROOT / "docker/resume_migrations.json").read_text())
+    migration = registry.get(name)
+    if (migration is None or migration["from_source_sha256"] != old["source_sha256"] or
+            migration["to_source_sha256"] != current["source_sha256"]):
+        raise RuntimeError("Resume migration does not match the exact old/current source pair")
+    return {"name": name, **migration}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", nargs="?", default="hm3dv2",
@@ -86,6 +101,7 @@ def main():
     parser.add_argument("--video", action="store_true", help="Stream MP4 per episode (bounded frame RAM)")
     parser.add_argument("--output", help="New experiment directory inside outputs/runs")
     parser.add_argument("--resume", action="store_true", help="Continue the same --output directory")
+    parser.add_argument("--resume-migration", help="Named, reviewed tooling-only source migration")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
@@ -104,6 +120,8 @@ def main():
         parser.error("--max-steps must be positive")
     if args.resume and not args.output:
         parser.error("--resume requires --output")
+    if args.resume_migration and not args.resume:
+        parser.error("--resume-migration requires --resume")
     if args.method != "baseline" and args.dataset != "hm3dv2":
         parser.error("Active-view experiments currently require hm3dv2")
     stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
@@ -150,8 +168,7 @@ def main():
                 raise RuntimeError("Resume requires identical dataset/count/video/method/seed settings; "
                                    "legacy runs without provenance must use a separate directory")
             old = json.loads((output / "provenance.json").read_text())
-            if old["source_sha256"] != provenance["source_sha256"]:
-                raise RuntimeError("Runtime source changed; start a separate experiment")
+            migration = resume_migration(old, provenance, args.resume_migration)
         else:
             output.mkdir(parents=True, exist_ok=False)
             manifest.write_text(json.dumps(spec, indent=2) + "\n")
@@ -167,7 +184,27 @@ def main():
         register_hydra_plugin(HabitatConfigPlugin)
         with initialize_config_dir(config_dir=str(ROOT / "config"), version_base=None):
             config = compose(config_name=f"habitat_eval_{args.dataset}", overrides=command[5:])
-        (output / "config.yaml").write_text(OmegaConf.to_yaml(config, resolve=True))
+        config_text = OmegaConf.to_yaml(config, resolve=True)
+        if args.resume:
+            if (output / "config.yaml").read_text() != config_text:
+                raise RuntimeError("Resolved config changed; refusing to resume")
+            # Preserve the original provenance and each previous attempt. A
+            # tooling migration is visible, never relabelled as identical code.
+            sys.path.insert(0, str(ROOT))
+            from basic_utils.record_episode.experiment import read_rows
+            rows = read_rows(output)
+            attempts = output / "resume-provenance"
+            attempts.mkdir(exist_ok=True)
+            record = {"resumed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                      "completed_before_resume": len(rows), "original": old,
+                      "current": provenance, "migration": migration,
+                      "episodes_csv_sha256": hashlib.sha256(
+                          (output / "episodes.csv").read_bytes()).hexdigest() if rows else None,
+                      "config_sha256": hashlib.sha256(config_text.encode()).hexdigest()}
+            with (attempts / f"attempt-{time.time_ns()}.json").open("x") as stream:
+                stream.write(json.dumps(record, indent=2) + "\n")
+        else:
+            (output / "config.yaml").write_text(config_text)
         available_kib = next(int(line.split()[1]) for line in Path("/proc/meminfo").read_text().splitlines()
                              if line.startswith("MemAvailable:"))
         if available_kib < 3 * 1024**2:

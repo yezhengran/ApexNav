@@ -1,0 +1,8 @@
+{
+  "habitat-initial-reset-v1": {
+    "from_source_sha256": "b7912d500a2d352c4583d81a1406d2c1faf4ac752fd050ff4cbd4a1da5415de9",
+    "to_source_sha256": "baeceb2fb97f512c3608068ce081bcc7631b6eba61c8ebf71656c2dd26dd859f",
+    "reason": "Fix initial Habitat reset cursor and preserve resume attempt provenance; navigation, models and experiment parameters unchanged.",
+    "validation_report": "docs/experiments/2026-11-09-resume-tooling.zh-CN.md"
+  }
+}

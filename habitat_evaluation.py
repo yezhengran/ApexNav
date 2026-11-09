@@ -72,7 +72,7 @@ from basic_utils.object_point_cloud_utils.object_point_cloud import (
 from basic_utils.record_episode.read_record import read_record
 from basic_utils.record_episode.write_record import write_record
 from basic_utils.record_episode.experiment import (
-    EpisodeVideo, episode_plan, resume_state, save_result,
+    EpisodeVideo, episode_plan, resume_state, save_result, seek_episode,
     record_episode_identity,
 )
 from habitat2ros.habitat_publisher import ROSPublisherNonNode
@@ -358,9 +358,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         return
 
     pbar = tqdm.tqdm(total=number_of_episodes, initial=num_total)
-    while env_count:
-        next(env.episode_iterator)
-        env_count -= 1
+    seek_episode(env, env_count)
 
     for epi in range(remaining):
         # Publish progress information

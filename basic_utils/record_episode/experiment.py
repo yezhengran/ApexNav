@@ -27,6 +27,16 @@ def episode_plan(available, completed=0, limit=-1, single=-1):
     return target, completed, max(0, target - completed)
 
 
+def seek_episode(env, skip):
+    """Position a newly constructed Habitat Env before its first reset.
+
+    Env already consumed episode zero and pins it for the initial reset.
+    Advancing only the iterator leaves that pinned episode unchanged.
+    """
+    for _ in range(skip):
+        env.current_episode = next(env.episode_iterator)
+
+
 def read_rows(directory):
     path = Path(directory) / "episodes.csv"
     if not path.exists():

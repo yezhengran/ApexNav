@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -14,7 +15,7 @@ from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, read_rows, resume_state, save_result,
     record_episode_identity,
 )
-from run_batch import evaluation_command, stop_owned
+from run_batch import evaluation_command, stop_owned, resume_migration
 from compare_runs import compare
 
 
@@ -105,6 +106,26 @@ class BatchTest(unittest.TestCase):
                 process.kill()
                 process.wait()
 
+    def test_resume_migration_requires_exact_reviewed_pair(self):
+        old, current = {"source_sha256": "old"}, {"source_sha256": "new"}
+        self.assertIsNone(resume_migration(old, old))
+        with self.assertRaises(RuntimeError):
+            resume_migration(old, current)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "docker").mkdir()
+            (root / "docker/resume_migrations.json").write_text(json.dumps({
+                "cursor-fix": {"from_source_sha256": "old", "to_source_sha256": "new",
+                               "reason": "test-only migration"}}))
+            with patch("run_batch.ROOT", root):
+                self.assertEqual(resume_migration(old, current, "cursor-fix")["name"],
+                                 "cursor-fix")
+                for left, right, name in ((current, old, "cursor-fix"),
+                                          (old, {"source_sha256": "other"}, "cursor-fix"),
+                                          (old, current, "unknown")):
+                    with self.assertRaises(RuntimeError):
+                        resume_migration(left, right, name)
+
     def test_comparison_matches_prefix_and_rejects_mismatched_episodes(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = [Path(directory) / name for name in ("baseline", "adaptive")]
@@ -121,6 +142,13 @@ class BatchTest(unittest.TestCase):
             self.assertEqual(report["paired_episodes"], 1)
             self.assertFalse(report["complete"])
             self.assertEqual(report["delta_treatment_minus_baseline"]["spl"], 0)
+            attempts = paths[1] / "resume-provenance"
+            attempts.mkdir()
+            attempt = attempts / "attempt-1.json"
+            attempt.write_text(json.dumps({"current": {"source_sha256": "new-source"}}))
+            with self.assertRaisesRegex(ValueError, "source migration"):
+                compare(*paths)
+            attempt.unlink()
             csv_path = paths[1] / "episodes.csv"
             csv_path.write_text(csv_path.read_text().replace("scene-a", "scene-b"))
             with self.assertRaises(ValueError):

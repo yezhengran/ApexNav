@@ -19,6 +19,12 @@ def compare(baseline, method):
     provenance = [json.loads((p / "provenance.json").read_text()) for p in directories]
     if provenance[0]["source_sha256"] != provenance[1]["source_sha256"]:
         raise ValueError("Runtime source differs; this is not a controlled comparison")
+    for directory, original in zip(directories, provenance):
+        for path in (directory / "resume-provenance").glob("attempt-*.json"):
+            attempt = json.loads(path.read_text())
+            if attempt["current"]["source_sha256"] != original["source_sha256"]:
+                raise ValueError("Run includes a source migration; review segment provenance "
+                                 "before interpreting a controlled comparison")
     rows = []
     for directory in directories:
         with (directory / "episodes.csv").open(newline="") as stream:
