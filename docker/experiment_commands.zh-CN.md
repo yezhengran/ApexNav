@@ -45,14 +45,17 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验（暂勿执行）**：2026-11-06 真实续跑触发 `Episode order changed`，已被清单保护拦截；修复并验证前不要使用 `--resume`，也不要手改清单绕过。下面保留历史命令供修复时核验。当前 `review-400-065-020-100-r2` 已按用户要求暂停，保留 66 个完整回合；模型和自动跟进均已停止。用户明确要求继续后，先验证续跑工具修复和版本记录，再从第 67 回合开头继续，前 66 回合不重跑。详见 [暂停交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)。
+**续跑原实验**：2026-11-09 已修复首次 reset 的回合定位错误，并通过真实中断/续跑与非零单回合验证。只在确认没有评测运行时启动，保持原参数和输出目录。用户已要求从 66 回合保存点恢复 r2，实际启动状态先看 [交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)，勿重复启动。
 
 ```bash
-./docker/apexnav run-batch hm3dv2 --episodes 50 --video \
-  --method baseline --seed 100 --output outputs/runs/av-baseline-50 --resume
+./docker/apexnav run-batch hm3dv2 --episodes 100 --video \
+  --method selected_review --uncertain-after-steps 400 \
+  --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 \
+  --output outputs/runs/review-400-065-020-100-r2 \
+  --resume --resume-migration habitat-initial-reset-v1
 ```
 
-续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。
+续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。相同源码的普通续跑仅需 `--resume`；上面的迁移名只允许登记的精确旧/新源码指纹对，保留原 provenance，并在 `resume-provenance/` 新增恢复段记录。它不允许任意源码变化，不能手改清单或指纹绕过保护。详见 [工具修复验证](../docs/experiments/2026-11-09-resume-tooling.zh-CN.md)。
 
 2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。工作区必须提交；续跑需保持这些设置一致。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
 

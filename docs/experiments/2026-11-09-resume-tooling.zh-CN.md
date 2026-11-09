@@ -12,9 +12,12 @@ Habitat 0.3.3 的 `Env.__init__` 已消费第一个 episode，并用公开 `curr
 
 比较工具遇到发生源码迁移的运行时拒绝自动声称相同源码对照，要求先审阅分段 provenance。本轮最终结果应标明第 67 回合前曾中断、恢复段含工具修复；进程重启也不会恢复回合内随机数状态，不能保证与不中断运行逐动作相同。
 
-## 已验证与待执行
+## 验证结果
 
 - 容器内现有批量回归共 9 项通过，包括 CSV/汇总、视频、清单拒绝混集、进程停止、精确迁移许可及比较保护。
 - 真实 Habitat 使用原 HM3Dv2 val、seed=100，对零起点、索引 5/27/66/99 定位后实际 reset/render，核验自身与后继回合（共 9 次 reset）身份均匹配固定清单；包括 27→28 跨场景和 66→67 连续顺序。正式目标起点是零基索引 66，即全局第 67 回合、场景 `6s7QHgap2fW` / ID `10` / tv。
 - 证据保存在 `experiment_notes/validation/20261109-resume/batch-tests.log`、`habitat-cursor.log`、`habitat-cursor.json`；未新增一次性测试代码文件。
-- 提交后先运行独立低步数诊断，真实中断再续跑，并验证非零单回合评测入口。诊断不计入正式成绩；通过后才恢复剩余 34 回合，仍使用原参数及视频设置。
+- 修复提交 `544405738ee16ecfa4f45086847132fbcb0f7ec0` 已推送并核对远程 SHA。恢复段源码指纹为 `baeceb2fb97f512c3608068ce081bcc7631b6eba61c8ebf71656c2dd26dd859f`，与原指纹的对应关系记录在迁移登记文件。
+- 真实端到端诊断：`outputs/runs/resume-tool-diagnostic-20261109/`，3 回合、每回合最多 3 步、同样 selected_review/400/0.65/0.20、seed=100、保存视频。完成第 1 回合后 SIGINT 得到 `interrupted / 130`；随后使用 `--resume` 完成第 2/3 回合，最终 `completed / 0`。3 个回合顺序正确、唯一；原第 1 行结果、配置和 provenance 字节保持不变，独立续跑版本记录存在。证据：`end-to-end-resume.json` 及配套日志。
+- 实际评测入口 `test_epi_num=66` 的独立 3 步单回合诊断也通过，实际 scene/episode/target 为 `6s7QHgap2fW` / `10` / tv，结果在 `outputs/runs/resume-single-66-diagnostic-20261109/`。这两个低步数诊断不计入正式成绩。只读核验正式 100 回合恢复参数解析出的配置与原 `config.yaml` 逐字相同，精确旧/新源码指纹迁移通过；证据为 `nonzero-single.json`。
+- 诊断退出后确认没有评测/规划器残留；四模型已按原配置启动，实际 HTTP 推理检查通过，主机可用 RAM 约 6.0 GiB。接下来使用同一正式目录恢复剩余 34 回合，原参数及视频设置保持不变。
