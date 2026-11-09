@@ -20,4 +20,10 @@ Habitat 0.3.3 的 `Env.__init__` 已消费第一个 episode，并用公开 `curr
 - 修复提交 `544405738ee16ecfa4f45086847132fbcb0f7ec0` 已推送并核对远程 SHA。恢复段源码指纹为 `baeceb2fb97f512c3608068ce081bcc7631b6eba61c8ebf71656c2dd26dd859f`，与原指纹的对应关系记录在迁移登记文件。
 - 真实端到端诊断：`outputs/runs/resume-tool-diagnostic-20261109/`，3 回合、每回合最多 3 步、同样 selected_review/400/0.65/0.20、seed=100、保存视频。完成第 1 回合后 SIGINT 得到 `interrupted / 130`；随后使用 `--resume` 完成第 2/3 回合，最终 `completed / 0`。3 个回合顺序正确、唯一；原第 1 行结果、配置和 provenance 字节保持不变，独立续跑版本记录存在。证据：`end-to-end-resume.json` 及配套日志。
 - 实际评测入口 `test_epi_num=66` 的独立 3 步单回合诊断也通过，实际 scene/episode/target 为 `6s7QHgap2fW` / `10` / tv，结果在 `outputs/runs/resume-single-66-diagnostic-20261109/`。这两个低步数诊断不计入正式成绩。只读核验正式 100 回合恢复参数解析出的配置与原 `config.yaml` 逐字相同，精确旧/新源码指纹迁移通过；证据为 `nonzero-single.json`。
-- 诊断退出后确认没有评测/规划器残留；四模型已按原配置启动，实际 HTTP 推理检查通过，主机可用 RAM 约 6.0 GiB。接下来使用同一正式目录恢复剩余 34 回合，原参数及视频设置保持不变。
+- 诊断退出后确认没有评测/规划器残留；四模型已按原配置启动，实际 HTTP 推理检查通过，主机可用 RAM 约 6.0 GiB。
+
+## 正式恢复
+
+2026-11-09 16:23（北京时间）以 Docker detached exec 恢复同一正式目录，启动提交 `b6f6e6fa22d9c46f84614639e963f7164c478957`，源码指纹与上述工具修复一致。参数为原 `selected_review`、seed=100、500 步、0.65/0.20、400 步不确定门槛、保存视频，并附加 `--resume --resume-migration habitat-initial-reset-v1`。日志 `outputs/runtime/review-100-r2-resume-20261109-launcher.log`；版本记录 `resume-provenance/attempt-1794212606829133367.json`。
+
+已确认唯一评测/规划器正常推进第 67 回合，前 66 行结果、原 config/provenance 均未改变，恢复记录的 CSV 哈希与暂停备份一致。额外保留 `paused-prefix-0066.csv` 供后续检查，不随检查点更新覆盖；恢复版本记录和 `resume-start-validation-20261109.json` 已保存到原 hundred validation 备份目录。自动跟进恢复 ACTIVE，每 20 分钟检查，每个新 10 回合检查点保存结果；满 100 后分析并先向用户对齐算法修改。

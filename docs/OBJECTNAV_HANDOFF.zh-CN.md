@@ -4,7 +4,9 @@
 
 ## 最新状态：用户要求恢复 100 回合实验
 
-**2026-11-09 用户明确要求“继续实验”，撤销此前暂停。** 已核验暂停时 217 个原始文件及归档完全未变；续跑工具修复 `5444057` 已推送，9 项回归、真实 Habitat 9 次重置、3 步诊断中断后续跑、非零单回合入口均通过。正式配置逐字一致，算法、模型、参数未变。准备从第 67 回合开头恢复，前 66 回合保留。启动状态需核对进程和输出，禁止重复启动。详见 [恢复工具验证](experiments/2026-11-09-resume-tooling.zh-CN.md)。
+**2026-11-09 用户明确要求“继续实验”，撤销此前暂停。16:23（北京时间）已从第 67 回合开头恢复，前 66 回合保留。** 续跑启动提交 `b6f6e6f`；Docker detached exec 日志为 `outputs/runtime/review-100-r2-resume-20261109-launcher.log`。已确认第 67 回合 tv 正常推进，只有一份批量评测和规划器；自动跟进 `objectnav-100` 已恢复 `ACTIVE`（20 分钟），仅在检查点、完成、异常或需用户决策时更新。`status.json` 在退出前可能仍显示旧 `interrupted / 130`，需结合实际进程判断，禁止重复启动。
+
+恢复前已核验暂停时 217 个原始文件及归档完全未变；续跑工具修复 `5444057` 已推送，9 项回归、真实 Habitat 9 次重置、3 步诊断中断后续跑、非零单回合入口均通过。正式配置逐字一致，算法、模型、参数未变。恢复起点和版本记录已备份到本次 validation 目录的 `resume-start-validation-20261109.json` / `resume-provenance/`；`paused-prefix-0066.csv` 单独保留供后续检查前 66 行，不能被新检查点备份覆盖。详见 [恢复工具验证](experiments/2026-11-09-resume-tooling.zh-CN.md)。
 
 恢复段源码指纹为 `baeceb2fb97f512c3608068ce081bcc7631b6eba61c8ebf71656c2dd26dd859f`。使用 `--resume --resume-migration habitat-initial-reset-v1`，只允许原/当前精确指纹对；原 provenance 不改写，`resume-provenance/attempt-*.json` 记录恢复提交、起点与文件校验。旧的“不使用 --resume”约束已由验证后的工具修复替代；剩余 34 回合继续冻结算法/配置，结束后才分析并向用户对齐方法修复。
 
