@@ -70,3 +70,5 @@ active_view:
   uncertain_after_steps: 350
   max_inspection_steps: 48
   max_stationary_steps: 24
+  recent_evidence: false  # A1: bounded recent crops and verification during observation
+  turn_first: false       # A2: orient before translating; stop after 3 blocked advances

@@ -531,7 +531,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if view is not None:
                 decision = view.observe(
                     raw_rgb, observations, object_masks_list, score_list, label_list,
-                    camera_pitch, count_steps)
+                    camera_pitch, count_steps, action=int(action))
                 if decision is not None:
                     node.request_inspection([])
                     node.submit_review(decision)

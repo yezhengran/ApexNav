@@ -5,12 +5,14 @@ import argparse
 import datetime
 import fcntl
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 import sys
+import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,10 +41,10 @@ def stop_owned(process):
 
 def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
-                       uncertain_after_steps=350):
+                       uncertain_after_steps=350, episode_index=-1, review_profile="legacy"):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
-        "test_epi_num=-1", f"+max_episodes={episodes}",
+        f"test_epi_num={episode_index}", f"+max_episodes={episodes}",
         "llm.llm_client.llm_client=none", f"need_video={str(video).lower()}",
         f"video_output_path={output}",
         f"habitat.seed={seed}",
@@ -52,29 +54,63 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                         f"active_view.itm_confirm_threshold={confirm_threshold}",
                         f"active_view.itm_reject_threshold={reject_threshold}",
                         f"active_view.uncertain_after_steps={uncertain_after_steps}"])
+        if review_profile != "legacy":
+            command.extend(["active_view.recent_evidence=true",
+                            f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
 
 
-def source_provenance():
-    """Fingerprint tracked runtime files; documentation commits may follow a run."""
+def runtime_sources():
+    """Read tracked and non-ignored runtime files, including new uncommitted code."""
     # The bind-mounted checkout is owned by the host user; trust only this
     # explicit path for this invocation, never change global Git configuration.
     git = ["git", "-c", f"safe.directory={ROOT}"]
     revision = subprocess.check_output([*git, "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    names = subprocess.check_output([*git, "ls-files", "-z"], cwd=ROOT).split(b"\0")
-    digest = hashlib.sha256()
-    for name in sorted(n for n in names if n):
+    names = subprocess.check_output(
+        [*git, "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=ROOT).split(b"\0")
+    sources = {}
+    for name in sorted(set(n for n in names if n)):
         path = ROOT / os.fsdecode(name)
         if (path.suffix in (".py", ".cpp", ".h", ".hpp", ".yaml", ".patch", ".sh") or
                 name == b"docker/apexnav"):
-            digest.update(name + b"\0" + path.read_bytes() + b"\0")
+            if not path.resolve().is_relative_to(ROOT.resolve()):
+                raise RuntimeError(f"Runtime source escapes checkout: {path}")
+            if path.exists():  # Deleted tracked files are absent from this snapshot.
+                sources[name] = path.read_bytes()
     dirty = subprocess.check_output(
         [*git, "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True).strip()
-    if dirty:
+    return revision, sources, bool(dirty)
+
+
+def source_digest(sources):
+    digest = hashlib.sha256()
+    for name, data in sorted(sources.items()):
+        digest.update(name + b"\0" + data + b"\0")
+    return digest.hexdigest()
+
+
+def source_provenance(snapshot_dir=None):
+    """Require a commit or an explicit, complete local runtime-source snapshot."""
+    revision, sources, dirty = runtime_sources()
+    if dirty and snapshot_dir is None:
         raise RuntimeError("Commit source/config changes before starting a reproducible batch")
-    return {"code_sha": revision, "source_sha256": digest.hexdigest()}
+    record = {"code_sha": revision, "source_sha256": source_digest(sources)}
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=False)
+        archive = snapshot_dir / "runtime-source.tar.gz"
+        with tarfile.open(archive, "w:gz") as stream:
+            for name, data in sorted(sources.items()):
+                info = tarfile.TarInfo(os.fsdecode(name))
+                info.size = len(data)
+                stream.addfile(info, io.BytesIO(data))
+        record.update(source_kind="worktree_snapshot", uncommitted=dirty,
+                      source_archive=str(archive.relative_to(ROOT)),
+                      archive_sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+        (snapshot_dir / "files.json").write_text(json.dumps(
+            {os.fsdecode(n): hashlib.sha256(d).hexdigest() for n, d in sources.items()}, indent=2) + "\n")
+    return record
 
 
 def resume_migration(old, current, name=None):
@@ -102,10 +138,16 @@ def main():
     parser.add_argument("--output", help="New experiment directory inside outputs/runs")
     parser.add_argument("--resume", action="store_true", help="Continue the same --output directory")
     parser.add_argument("--resume-migration", help="Named, reviewed tooling-only source migration")
+    parser.add_argument("--snapshot-source", action="store_true",
+                        help="Archive exact runtime source locally; permits testing before committing")
+    parser.add_argument("--episode-index", type=int, default=-1,
+                        help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn"],
+                        default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
     parser.add_argument("--reject-threshold", type=float, default=0.20)
     parser.add_argument("--uncertain-after-steps", type=int, default=350)
@@ -122,6 +164,10 @@ def main():
         parser.error("--resume requires --output")
     if args.resume_migration and not args.resume:
         parser.error("--resume-migration requires --resume")
+    if args.episode_index < -1 or (args.episode_index >= 0 and (args.episodes != 1 or args.resume)):
+        parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
+    if args.review_profile != "legacy" and args.method != "selected_review":
+        parser.error("--review-profile requires --method selected_review")
     if args.method != "baseline" and args.dataset != "hm3dv2":
         parser.error("Active-view experiments currently require hm3dv2")
     stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
@@ -131,7 +177,8 @@ def main():
         parser.error("--output must name a directory below outputs/runs")
     command = evaluation_command(args.dataset, args.episodes, output, args.video, args.max_steps,
                                  args.method, args.seed, args.confirm_threshold,
-                                 args.reject_threshold, args.uncertain_after_steps)
+                                 args.reject_threshold, args.uncertain_after_steps,
+                                 args.episode_index, args.review_profile)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -141,6 +188,11 @@ def main():
                           "uncertain_after_steps": args.uncertain_after_steps}
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
+    if args.episode_index >= 0:
+        spec["episode_index"] = args.episode_index
+        spec["diagnostic_subset"] = True
+    if args.review_profile != "legacy":
+        spec["review_profile"] = args.review_profile
     if args.dry_run:
         print(json.dumps({"spec": spec, "output": str(output), "command": command}, indent=2))
         return 0
@@ -162,7 +214,15 @@ def main():
         except BlockingIOError:
             raise RuntimeError("Another batch evaluation is running; do not share its ROS domain")
         manifest = output / "experiment.json"
-        provenance = source_provenance()
+        if not args.resume and output.exists():
+            raise RuntimeError("New experiment output already exists; refusing to overwrite")
+        if args.resume and not manifest.is_file():
+            raise RuntimeError("Resume output has no experiment manifest")
+        snapshot = None
+        if args.snapshot_source:
+            snapshot = (output / "resume-provenance" / f"source-{time.time_ns()}" if args.resume
+                        else output / "source-snapshot")
+        provenance = source_provenance(snapshot)
         if args.resume:
             if not manifest.is_file() or json.loads(manifest.read_text()) != spec:
                 raise RuntimeError("Resume requires identical dataset/count/video/method/seed settings; "
@@ -170,7 +230,7 @@ def main():
             old = json.loads((output / "provenance.json").read_text())
             migration = resume_migration(old, provenance, args.resume_migration)
         else:
-            output.mkdir(parents=True, exist_ok=False)
+            output.mkdir(parents=True, exist_ok=args.snapshot_source)
             manifest.write_text(json.dumps(spec, indent=2) + "\n")
             (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
         print(f"Experiment directory: {output}", flush=True)
@@ -242,6 +302,12 @@ def main():
         finally:
             stop_owned(evaluation)
             stop_owned(planner)
+            final_digest = source_digest(runtime_sources()[1])
+            if final_digest != provenance["source_sha256"]:
+                code, state = 1, "source_changed"
+            (output / "source-check.json").write_text(json.dumps({
+                "initial": provenance["source_sha256"], "final": final_digest,
+                "unchanged": final_digest == provenance["source_sha256"]}, indent=2) + "\n")
             (output / "status.json").write_text(json.dumps({"state": state, "exit_code": code}, indent=2) + "\n")
         print(f"Experiment {state}: {output}", flush=True)
         return code

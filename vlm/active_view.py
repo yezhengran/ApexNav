@@ -71,6 +71,11 @@ class SelectedTargetReviewer:
 
     def __init__(self, cfg, sensor, label, verifier, directory, episode):
         self.cfg, self.sensor, self.label, self.verifier = cfg, sensor, label, verifier
+        self.recent_evidence = getattr(cfg, 'recent_evidence', False)
+        self.turn_first = getattr(cfg, 'turn_first', False)
+        self.cache_steps = 20
+        self.max_calls = 2
+        self.cache = []
         if cfg.mode != 'selected_review':
             raise ValueError('SelectedTargetReviewer requires selected_review mode')
         if not (0 <= cfg.itm_reject_threshold < cfg.itm_confirm_threshold <= 1):
@@ -91,55 +96,126 @@ class SelectedTargetReviewer:
             stream.write(json.dumps({'step': self.step, 'event': event, **values},
                                     ensure_ascii=False, allow_nan=False) + '\n')
 
-    def observe(self, rgb, observations, masks, scores, labels, pitch, step):
-        """Collect current evidence only; return a decision on inspection timeout."""
+    def observe(self, rgb, observations, masks, scores, labels, pitch, step, action=None):
+        """Collect evidence without changing the original object-map input."""
+        previous_pose = self.pose
         self.step = step
         self.pose = [-float(observations['gps'][2]), -float(observations['gps'][0]),
                      float(observations['compass'][0])]
         self.current = []
-        for mask, score, label in zip(masks, scores, labels):
+        for index, (mask, score, label) in enumerate(zip(masks, scores, labels)):
             geometry = target_geometry(mask, observations, self.sensor, pitch)
             crop = crop_target(rgb, mask)
             if geometry is None or crop is None:
                 continue
+            crop_rgb = crop[0]
+            if self.recent_evidence:
+                from PIL import Image
+                thumbnail = Image.fromarray(crop_rgb)
+                thumbnail.thumbnail((256, 256))
+                crop_rgb = np.asarray(thumbnail).copy()
             self.current.append({'center': geometry[0], 'extent': geometry[1],
-                                 'crop': crop[0], 'score': float(score),
-                                 'label': int(label), 'step': step, 'pose': self.pose})
+                                 'crop': crop_rgb, 'score': float(score),
+                                 'label': int(label), 'step': step, 'pose': self.pose,
+                                 'key': (step, index), 'pixels': crop[1], 'complete': crop[2]})
+        if self.recent_evidence:
+            # A bounded, episode-local image buffer, not a target selector.
+            self.cache = [e for e in self.cache if step - e['step'] <= self.cache_steps]
+            self.cache.extend(e for e in self.current if self._usable(e))
+            self.cache = self.cache[-48:]  # <= 9 MiB of RGB pixels at 256x256
         if self.active is not None:
             target = self.active
             self.stats['inspection_actions'] += 1
+            motion = float(np.linalg.norm(np.array(self.pose[:2]) - previous_pose[:2]))
+            if self.turn_first and action == 1:
+                target['blocked_forward'] = target['blocked_forward'] + 1 if motion < 0.05 else 0
+            if self.recent_evidence:
+                evidence = self._evidence(unused=True)
+                self.event('inspection_evidence', candidate=target['id'],
+                           action=action, displacement=motion,
+                           current_detections=len(self.current), cached_detections=len(self.cache),
+                           matched_evidence_step=evidence['step'] if evidence is not None else None,
+                           evidence_filter_counts=self.evidence_filter_counts,
+                           blocked_forward=target['blocked_forward'])
+                if evidence is not None and target['calls'] < self.max_calls:
+                    decision = self._verify('during', evidence)
+                    if decision != self.UNCERTAIN:
+                        return self._complete(decision, 'during_view_decisive')
+                    if target['calls'] >= self.max_calls:
+                        return self._complete(self.UNCERTAIN, 'verification_budget')
             if np.linalg.norm(np.array(self.pose[:2]) - target['last_position']) >= 0.05:
                 target['last_motion'] = step
                 target['last_position'] = np.array(self.pose[:2])
             if step - target['started'] >= self.cfg.max_inspection_steps:
-                return self._complete(self.UNCERTAIN, 'inspection_action_budget')
+                return self._finish('inspection_action_budget')
+            if self.turn_first and target['blocked_forward'] >= 3:
+                return self._finish('blocked_forward')
             if step - target['last_motion'] >= self.cfg.max_stationary_steps:
-                return self._complete(self.UNCERTAIN, 'no_translation')
+                return self._finish('no_translation')
         return None
 
-    def _evidence(self):
+    @staticmethod
+    def _usable(evidence):
+        return evidence['pixels'] >= 64
+
+    def _evidence(self, unused=False):
         target = self.selected
         matches = []
-        for evidence in self.current:
+        counts = {'expired': 0, 'small': 0, 'used': 0, 'same_view': 0, 'other_cluster': 0}
+        self.evidence_filter_counts = counts
+        pool = self.cache if self.recent_evidence else self.current
+        for evidence in pool:
+            if self.recent_evidence:
+                if self.step - evidence['step'] > self.cache_steps:
+                    counts['expired'] += 1
+                    continue
+                if not self._usable(evidence):
+                    counts['small'] += 1
+                    continue
+                if unused and evidence['key'] in target['used']:
+                    counts['used'] += 1
+                    continue
+                previous = target['last_evidence']
+                if unused and previous is not None:
+                    distance = np.linalg.norm(np.array(evidence['pose'][:2]) - previous['pose'][:2])
+                    yaw = abs(math.atan2(math.sin(evidence['pose'][2] - previous['pose'][2]),
+                                         math.cos(evidence['pose'][2] - previous['pose'][2])))
+                    better = (evidence['pixels'] >= 1.25 * previous['pixels'] or
+                              (evidence['complete'] and not previous['complete']))
+                    if distance < 0.15 and yaw < math.radians(15) and not better:
+                        counts['same_view'] += 1
+                        continue
             # Match the current mask to the selected map cluster's footprint.
             # No nearest-centre candidate registry can change target selection.
             center = evidence['center']
             outside = np.maximum(np.maximum(target['low'] - center,
                                             center - target['high']), 0)
             if np.linalg.norm(outside) > 0.20:
+                counts['other_cluster'] += 1
                 continue
             distance = float(np.linalg.norm(center - target['center']))
-            matches.append(((evidence['label'] != 0, distance, -evidence['score']), evidence))
+            rank = (evidence['label'] != 0, distance, -evidence['score'])
+            if self.recent_evidence:
+                rank = (evidence['label'] != 0, not evidence['complete'], -evidence['pixels'],
+                        self.step - evidence['step'], distance, -evidence['score'])
+            matches.append((rank, evidence))
         return min(matches, key=lambda pair: pair[0])[1] if matches else None
 
-    def _verify(self, phase):
+    def _verify(self, phase, evidence=None):
         from PIL import Image
 
-        target, evidence = self.selected, self._evidence()
+        target = self.selected
         if evidence is None:
-            self.event('verification_missing', candidate=target['id'], phase=phase)
+            evidence = self._evidence(unused=self.recent_evidence)
+        if evidence is None:
+            self.event('verification_missing', candidate=target['id'], phase=phase,
+                       current_detections=len(self.current), cached_detections=len(self.cache),
+                       evidence_filter_counts=self.evidence_filter_counts,
+                       reason='no_fresh_usable_spatial_match' if self.recent_evidence else 'no_current_match')
             return self.UNCERTAIN
-        crop_path = self.directory / f"candidate-{target['id']:03d}-{phase}.png"
+        if self.recent_evidence and target['calls'] >= self.max_calls:
+            return self.UNCERTAIN
+        crop_path = self.directory / f"candidate-{target['id']:03d}-{phase}-{target['calls']:02d}.png"
         Image.fromarray(evidence['crop']).save(crop_path)
         started = time.monotonic()
         score = float(self.verifier(evidence['crop'], f'A photo of a {self.label}.'))
@@ -148,9 +224,12 @@ class SelectedTargetReviewer:
         seconds = time.monotonic() - started
         self.stats['vlm_calls'] += 1
         self.stats['vlm_seconds'] += seconds
+        target['calls'] += 1
+        target['used'].add(evidence['key'])
+        target['last_evidence'] = evidence
         if score >= self.cfg.itm_confirm_threshold:
             decision = self.CONFIRMED
-        elif score <= self.cfg.itm_reject_threshold:
+        elif score <= self.cfg.itm_reject_threshold and (not self.recent_evidence or evidence['complete']):
             decision = self.REJECTED
         else:
             decision = self.UNCERTAIN
@@ -158,8 +237,17 @@ class SelectedTargetReviewer:
                    decision=decision, confirm_threshold=self.cfg.itm_confirm_threshold,
                    reject_threshold=self.cfg.itm_reject_threshold, seconds=seconds,
                    crop=str(crop_path), evidence_step=evidence['step'], pose=evidence['pose'],
+                   evidence_age=self.step - evidence['step'], complete=evidence['complete'],
+                   mask_pixels=evidence['pixels'],
+                   partial_negative_withheld=bool(self.recent_evidence and not evidence['complete']
+                                                  and score <= self.cfg.itm_reject_threshold),
                    detection_label=evidence['label'], detection_center=evidence['center'].tolist())
         return decision
+
+    def _finish(self, reason):
+        # A failed route is not evidence against the object's semantic class.
+        decision = self._verify('last_available') if self.recent_evidence else self.UNCERTAIN
+        return self._complete(decision, reason)
 
     def _complete(self, decision, reason):
         target = self.selected
@@ -185,7 +273,9 @@ class SelectedTargetReviewer:
             raise ValueError('High-confidence objects must retain the original planner path')
         self.selected = {'id': int(ident), 'center': np.array([cx, cy]),
                          'low': np.array([x0, y0]), 'high': np.array([x1, y1]),
-                         'extent': float(np.clip(extent, 0.15, 3.0))}
+                         'extent': float(np.clip(extent, 0.15, 3.0)),
+                         'used': set(), 'calls': 0, 'blocked_forward': 0,
+                         'last_evidence': None}
         self.stats['selected_targets'] += 1
         self.event('selected_target', candidate=int(ident), fused_confidence=confidence,
                    original_threshold=threshold, center=[cx, cy], extent=extent,
@@ -205,13 +295,14 @@ class SelectedTargetReviewer:
         if self.active is None:
             return []
         target = self.active
-        return [float(target['id']), *target['center'].tolist(), target['radius'], target['extent']]
+        data = [float(target['id']), *target['center'].tolist(), target['radius'], target['extent']]
+        return data + [1.0] if self.turn_first else data
 
     def finish_inspection(self, reachable=True):
         if self.active is None:
             raise RuntimeError('No selected target is under inspection')
         if not reachable:
-            return self._complete(self.UNCERTAIN, 'no_safe_viewpoint_or_path')
+            return self._finish('no_safe_viewpoint_or_path')
         decision = self._verify('active')
         return self._complete(decision, 'active_view_completed')
 

@@ -484,6 +484,20 @@ bool ExplorationFSM::maybeReviewSelected(int exploration_result)
 int ExplorationFSM::planInspection()
 {
   const Vector2d position(fd_->start_pt_(0), fd_->start_pt_(1));
+  if (active_view_.turn_first && !active_view_.oriented) {
+    const auto direction = (active_view_.center - position).eval();
+    double difference = std::atan2(direction.y(), direction.x()) - fd_->start_yaw_(0);
+    wrapAngle(difference);
+    if (direction.norm() > 0.05 && std::abs(difference) > 18.0 * M_PI / 180.0 &&
+        active_view_.orientation_steps < 6) {
+      ++active_view_.orientation_steps;
+      fd_->newest_action_ = difference > 0 ? ACTION::TURN_LEFT : ACTION::TURN_RIGHT;
+      return FINAL_RESULT::EXPLORE;
+    }
+    // Each real turn already supplied a fresh frame to the Python reviewer.
+    // If still uncertain, continue the existing size-adaptive safe route.
+    active_view_.oriented = true;
+  }
   auto map = expl_manager_->sdf_map_;
   auto clear = [map](const Vector2d& p) {
     return map->isInMap(p) && map->getOccupancy(p) != SDFMap2D::UNKNOWN &&

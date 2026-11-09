@@ -17,6 +17,8 @@ public:
   Eigen::Vector2d center = Eigen::Vector2d::Zero();
   double radius = 0.0, extent = 0.0;
   bool locked = false;
+  bool turn_first = false, oriented = false;
+  int orientation_steps = 0;
   Eigen::Vector2d goal = Eigen::Vector2d::Zero();
   using Safe = std::function<bool(const Eigen::Vector2d&)>;
   using Route = std::function<bool(const Eigen::Vector2d&, std::vector<Eigen::Vector2d>&)>;
@@ -24,17 +26,21 @@ public:
   bool set(const std::vector<double>& data)
   {
     if (data.empty()) { *this = ActiveView(); return true; }
-    if (data.size() != 5) return false;
+    if (data.size() != 5 && data.size() != 6) return false;
     for (double x : data) if (!std::isfinite(x)) return false;
     if (data[0] < 1 || data[0] > 1000000 || std::floor(data[0]) != data[0] ||
         data[3] < 0.6 || data[3] > 3.5 || data[4] < 0.15 || data[4] > 3.0)
       return false;
+    if (data.size() == 6 && data[5] != 1.0) return false;
     if (id == static_cast<int>(data[0])) return true;  // Freeze this instance.
     id = static_cast<int>(data[0]);
     center = Eigen::Vector2d(data[1], data[2]);
     radius = data[3];
     extent = data[4];
     locked = false;
+    turn_first = data.size() == 6;
+    oriented = false;
+    orientation_steps = 0;
     return true;
   }
 

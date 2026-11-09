@@ -45,7 +45,7 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验**：2026-11-09 已修复首次 reset 的回合定位错误，并通过真实中断/续跑与非零单回合验证。只在确认没有评测运行时启动，保持原参数和输出目录。用户已要求从 66 回合保存点恢复 r2，实际启动状态先看 [交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)，勿重复启动。
+**续跑原实验（历史示例）**：2026-11-09 已修复首次 reset 的回合定位错误，并通过真实中断/续跑与非零单回合验证。下面的 r2 已完成 100 回合，不需要再次启动；仅供查看当时恢复参数。新实验/继续工作先看 [交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)，不要对已完成目录重复启动。
 
 ```bash
 ./docker/apexnav run-batch hm3dv2 --episodes 100 --video \
@@ -57,7 +57,9 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 
 续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。相同源码的普通续跑仅需 `--resume`；上面的迁移名只允许登记的精确旧/新源码指纹对，保留原 provenance，并在 `resume-provenance/` 新增恢复段记录。它不允许任意源码变化，不能手改清单或指纹绕过保护。详见 [工具修复验证](../docs/experiments/2026-11-09-resume-tooling.zh-CN.md)。
 
-2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。工作区必须提交；续跑需保持这些设置一致。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
+2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。默认要求工作区已提交；若已约定“整轮测试后提交”，可显式加 `--snapshot-source`，在输出目录保存精确源码快照并记录 `uncommitted` 状态，结束再次检查源码指纹。运行中仍不得改代码或配置，快照不会放宽续跑一致性检查。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
+
+2026-11-09 复核消融新增 `--review-profile legacy|evidence|evidence_turn`：默认 legacy 保留原行为，evidence 为近期证据缓存/途中复核，evidence_turn 另加原地对准/受阻早退出；后两者仅用于 `--method selected_review`。`--episode-index N` 是零基数据集索引，只允许新目录、`--episodes 1`，标记为独立诊断，不允许与 `--resume` 同用。这轮已完整结束且未通过扩展门槛，下一轮先对齐方法，参见 [最终报告](../docs/experiments/2026-11-09-review-evidence-results.zh-CN.md)。
 
 仅对原规划器选中目标复核的新方案，先跑同集 10 回合开发集；**至少 8/10 成功且不低于基线后才能扩到 50**。350/400 步分别使用独立目录，阈值修改也使用新目录（详见 [新方案](../docs/experiments/2026-11-05-selected-target-review-plan.zh-CN.md)）：
 

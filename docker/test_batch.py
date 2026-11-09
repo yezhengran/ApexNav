@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 
@@ -15,7 +16,7 @@ from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, read_rows, resume_state, save_result,
     record_episode_identity,
 )
-from run_batch import evaluation_command, stop_owned, resume_migration
+from run_batch import evaluation_command, stop_owned, resume_migration, source_provenance
 from compare_runs import compare
 
 
@@ -83,6 +84,47 @@ class BatchTest(unittest.TestCase):
         self.assertIn("active_view.uncertain_after_steps=400", adaptive)
         self.assertIn("habitat.seed=100", adaptive)
         self.assertFalse(any("active_view" in item for item in command))
+
+    def test_ablation_command_preserves_thresholds_and_single_index(self):
+        for profile in ('evidence', 'evidence_turn'):
+            command = evaluation_command('hm3dv2', 1, Path('/tmp/a'), True,
+                                         method='selected_review', episode_index=66,
+                                         review_profile=profile, uncertain_after_steps=400)
+            self.assertIn('test_epi_num=66', command)
+            self.assertIn('active_view.recent_evidence=true', command)
+            self.assertIn(f"active_view.turn_first={str(profile == 'evidence_turn').lower()}", command)
+            self.assertIn('active_view.itm_confirm_threshold=0.65', command)
+            self.assertIn('active_view.itm_reject_threshold=0.2', command)
+
+    def test_dirty_source_requires_complete_explicit_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, stderr=subprocess.DEVNULL)
+            git('init')
+            (root / '.gitignore').write_text('outputs/\nsecret.env\n')
+            (root / 'runtime.py').write_text('version = 1\n')
+            git('add', '.gitignore', 'runtime.py')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture')
+            with patch('run_batch.ROOT', root):
+                clean = source_provenance()
+                (root / 'runtime.py').write_text('version = 2\n')
+                (root / 'new.py').write_text('new = True\n')
+                (root / 'secret.env').write_text('TEST_SECRET=not-a-real-secret\n')
+                with self.assertRaises(RuntimeError):
+                    source_provenance()
+                saved = source_provenance(root / 'outputs/snapshot')
+                self.assertNotEqual(clean['source_sha256'], saved['source_sha256'])
+                self.assertEqual(clean['code_sha'], saved['code_sha'])
+                self.assertTrue(saved['uncommitted'])
+                with tarfile.open(root / saved['source_archive']) as archive:
+                    self.assertEqual(set(archive.getnames()), {'runtime.py', 'new.py'})
+                    self.assertEqual(archive.extractfile('runtime.py').read(), b'version = 2\n')
+                again = source_provenance(root / 'outputs/again')
+                self.assertEqual(saved['source_sha256'], again['source_sha256'])
+                (root / 'runtime.py').unlink()
+                deleted = source_provenance(root / 'outputs/deleted')
+                self.assertNotEqual(saved['source_sha256'], deleted['source_sha256'])
 
     def test_episode_manifest_rejects_changed_order_and_gaps(self):
         with tempfile.TemporaryDirectory() as directory:
