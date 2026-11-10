@@ -52,6 +52,7 @@ struct DetectedObject {
   pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>> cloud;  ///< 3D point cloud of detected object
   double score;                                           ///< Confidence score from detector (0-1)
   int label;                                              ///< Semantic class label from detection
+  int source_index = -1;  ///< Original mask index, before any filtering
 };
 
 struct Viewpoint2D {
@@ -116,7 +117,10 @@ public:
       vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>>& top_object_clouds,
       bool limited_confidence = true, bool extreme = false, vector<int>* object_ids = nullptr);
   // Review state affects only goal eligibility, never stored observations/fusion.
-  enum ReviewState { UNREVIEWED = 0, CONFIRMED = 1, UNCERTAIN = 2, REJECTED = 3 };
+  enum ReviewState { UNREVIEWED = 0, CONFIRMED = 1, UNCERTAIN = 2, REJECTED = 3,
+                     PENDING_EVIDENCE = 4 };
+  uint64_t evidence_episode_token_ = 0;  // Reset with this episode's object map.
+  bool stop_review_gating_ = false;
   int reviewState(int object_id) const;
   bool setReviewState(int object_id, int state);
   bool reviewInfo(int object_id, vector<double>& data) const;

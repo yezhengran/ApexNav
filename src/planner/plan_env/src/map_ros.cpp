@@ -40,6 +40,8 @@ void MapROS::setNode(rclcpp::Node::SharedPtr node)
 
 void MapROS::init()
 {
+  association_pub_ = node_->create_publisher<plan_env::msg::DetectionAssociation>(
+      "/detector/associations", 10);
   // Load camera intrinsic parameters from ROS2 parameter server
   if (!node_->has_parameter("map_ros/fx")) {
     node_->declare_parameter("map_ros/fx", -1.0);
@@ -213,11 +215,35 @@ void MapROS::itmScoreCallback(const std_msgs::msg::Float64::SharedPtr msg)
 
 void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithConfidence::SharedPtr msg)
 {
+  plan_env::msg::DetectionAssociation association;
+  association.episode_token = msg->episode_token;
+  association.observation_id = msg->observation_id;
+  association.candidate_ids.assign(msg->point_clouds.size(), 0);
+  association.reasons.assign(msg->point_clouds.size(), "filtered");
+  association.bounds.assign(4 * msg->point_clouds.size(), 0.0);
+  auto publish_association = [&]() {
+    if (msg->episode_token) association_pub_->publish(association);
+  };
   // Validate message structure consistency
   if (!(msg->confidence_scores.size() == msg->point_clouds.size() &&
           msg->confidence_scores.size() == msg->label_indices.size())) {
     RCLCPP_ERROR(node_->get_logger(), "[Bug] The MultipleMasksWithConfidence msg is wrong!!!");
+    std::fill(association.reasons.begin(), association.reasons.end(), "invalid_arrays");
+    publish_association();
     return;
+  }
+
+  if (msg->episode_token) {
+    auto& token = map_->object_map2d_->evidence_episode_token_;
+    // Tokens are monotonic wall-clock nanoseconds, assigned once per reset.
+    // A stale message must never acquire a current episode's candidate ID.
+    if ((token && token != msg->episode_token) ||
+        rclcpp::Time(msg->header.stamp) < map_start_time_) {
+      std::fill(association.reasons.begin(), association.reasons.end(), "stale_episode");
+      publish_association();
+      return;
+    }
+    token = msg->episode_token;
   }
 
   auto t1 = node_->get_clock()->now();
@@ -228,8 +254,11 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
   if (euler[2] < 0)
     euler[2] += M_PI;
   double camera_pitch = euler[2];
-  if (camera_pitch < 1.5)  // Skip if camera not tilted down enough
+  if (camera_pitch < 1.5) {  // Keep original orientation filter.
+    std::fill(association.reasons.begin(), association.reasons.end(), "camera_orientation");
+    publish_association();
     return;
+  }
 
   // Backup previous over-depth object cloud for consistency tracking
   auto last_over_depth_cloud =
@@ -275,6 +304,7 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
 
     // Skip objects that are entirely beyond valid depth range
     if (single_object_cloud->points.empty()) {
+      association.reasons[i] = "no_in_range_points";
       if (!over_depth_object_cloud->points.empty()) {
         RCLCPP_ERROR(node_->get_logger(), "Have all over depth object cloud!!!!");
         *map_->object_map2d_->over_depth_object_cloud_ += *over_depth_object_cloud;
@@ -285,11 +315,13 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
     // Apply DBSCAN clustering to remove noise and outliers
     single_object_cloud = dbscan(single_object_cloud, 0.12f, 10);
     if (single_object_cloud == nullptr) {
+      association.reasons[i] = "dbscan";
       RCLCPP_ERROR(node_->get_logger(), "After DBSCAN, no point cloud cluster!!");
       continue;
     }
 
     if (single_object_cloud->points.empty()) {
+      association.reasons[i] = "empty_filtered_cloud";
       RCLCPP_ERROR(node_->get_logger(), "Single object point cloud is empty!!!");
       continue;
     }
@@ -300,6 +332,8 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
     detected_object.cloud = single_object_cloud;
     detected_object.score = confidence_score;
     detected_object.label = label;
+    detected_object.source_index = static_cast<int>(i);
+    association.reasons[i] = "no_occupied_cluster";
     detected_objects.push_back(detected_object);
   }
 
@@ -323,7 +357,20 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
   // Update object map with processed detection results
   *map_->object_map2d_->all_object_clouds_ = *filtered_all_object_cloud;
   vector<int> detected_object_cluster_ids;
-  map_->inputObjectCloud2D(detected_objects, detected_object_cluster_ids);
+  vector<int> source_cluster_ids(msg->point_clouds.size(), -1);
+  map_->inputObjectCloud2D(detected_objects, detected_object_cluster_ids,
+                         msg->episode_token ? &source_cluster_ids : nullptr);
+  if (msg->episode_token) {
+    for (size_t i = 0; i < source_cluster_ids.size(); ++i) {
+      vector<double> info;
+      if (map_->object_map2d_->reviewInfo(source_cluster_ids[i], info)) {
+        association.candidate_ids[i] = source_cluster_ids[i] + 1;
+        association.reasons[i] = "assigned";
+        std::copy(info.begin() + 6, info.end(), association.bounds.begin() + 4 * i);
+      }
+    }
+    publish_association();
+  }
 
   // Extract observation data from depth sensor for objects not detected by vision
   getObservationObjectsCloud(detected_object_cluster_ids);

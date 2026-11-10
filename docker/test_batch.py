@@ -86,7 +86,7 @@ class BatchTest(unittest.TestCase):
         self.assertFalse(any("active_view" in item for item in command))
 
     def test_ablation_command_preserves_thresholds_and_single_index(self):
-        for profile in ('evidence', 'evidence_turn'):
+        for profile in ('evidence', 'evidence_turn', 'linked', 'linked_stop'):
             command = evaluation_command('hm3dv2', 1, Path('/tmp/a'), True,
                                          method='selected_review', episode_index=66,
                                          review_profile=profile, uncertain_after_steps=400)
@@ -95,6 +95,8 @@ class BatchTest(unittest.TestCase):
             self.assertIn(f"active_view.turn_first={str(profile == 'evidence_turn').lower()}", command)
             self.assertIn('active_view.itm_confirm_threshold=0.65', command)
             self.assertIn('active_view.itm_reject_threshold=0.2', command)
+            self.assertEqual('active_view.linked_evidence=true' in command, profile in ('linked', 'linked_stop'))
+            self.assertEqual('active_view.stop_review=true' in command, profile == 'linked_stop')
 
     def test_dirty_source_requires_complete_explicit_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -110,6 +112,8 @@ class BatchTest(unittest.TestCase):
                 clean = source_provenance()
                 (root / 'runtime.py').write_text('version = 2\n')
                 (root / 'new.py').write_text('new = True\n')
+                (root / 'Evidence.msg').write_text('uint64 episode_token\n')
+                (root / 'CMakeLists.txt').write_text('project(test_fixture)\n')
                 (root / 'secret.env').write_text('TEST_SECRET=not-a-real-secret\n')
                 with self.assertRaises(RuntimeError):
                     source_provenance()
@@ -118,7 +122,8 @@ class BatchTest(unittest.TestCase):
                 self.assertEqual(clean['code_sha'], saved['code_sha'])
                 self.assertTrue(saved['uncommitted'])
                 with tarfile.open(root / saved['source_archive']) as archive:
-                    self.assertEqual(set(archive.getnames()), {'runtime.py', 'new.py'})
+                    self.assertEqual(set(archive.getnames()),
+                                     {'runtime.py', 'new.py', 'Evidence.msg', 'CMakeLists.txt'})
                     self.assertEqual(archive.extractfile('runtime.py').read(), b'version = 2\n')
                 again = source_provenance(root / 'outputs/again')
                 self.assertEqual(saved['source_sha256'], again['source_sha256'])

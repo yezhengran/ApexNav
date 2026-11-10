@@ -57,6 +57,10 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_profile != "legacy":
             command.extend(["active_view.recent_evidence=true",
                             f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
+        if review_profile in ("linked", "linked_stop"):
+            prefix = '+' if dataset != 'hm3dv2' else ''
+            command.extend([f"{prefix}active_view.linked_evidence=true",
+                            f"{prefix}active_view.stop_review={str(review_profile == 'linked_stop').lower()}"])
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
@@ -73,7 +77,14 @@ def runtime_sources():
     sources = {}
     for name in sorted(set(n for n in names if n)):
         path = ROOT / os.fsdecode(name)
-        if (path.suffix in (".py", ".cpp", ".h", ".hpp", ".yaml", ".patch", ".sh") or
+        # Historical ROS1 catkin entry; absent in this ROS2 image and not used by
+        # colcon. Match the exact inert link, never relax other escaping paths.
+        if (name == b'src/CMakeLists.txt' and path.is_symlink() and
+                os.readlink(path) == '/opt/ros/noetic/share/catkin/cmake/toplevel.cmake' and
+                not path.exists()):
+            continue
+        if (path.suffix in (".py", ".cpp", ".h", ".hpp", ".yaml", ".patch", ".sh", ".msg") or
+                path.name in ("CMakeLists.txt", "package.xml") or
                 name == b"docker/apexnav"):
             if not path.resolve().is_relative_to(ROOT.resolve()):
                 raise RuntimeError(f"Runtime source escapes checkout: {path}")
@@ -146,7 +157,7 @@ def main():
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn"],
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
     parser.add_argument("--reject-threshold", type=float, default=0.20)
@@ -276,7 +287,9 @@ def main():
                 planner = subprocess.Popen(
                     ["ros2", "launch", "exploration_manager", "exploration.launch.py",
                      f"review_enabled:={str(args.method == 'selected_review').lower()}",
-                     f"review_late_step:={args.uncertain_after_steps}"],
+                     f"review_late_step:={args.uncertain_after_steps}",
+                     f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop')).lower()}",
+                     f"review_stop:={str(args.review_profile == 'linked_stop').lower()}"],
                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                 )
             time.sleep(3)

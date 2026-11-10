@@ -61,7 +61,7 @@ from habitat.utils.visualizations.utils import (
 )
 
 # ROS message imports
-from plan_env.msg import MultipleMasksWithConfidence
+from plan_env.msg import MultipleMasksWithConfidence, DetectionAssociation, ReviewEvidence
 
 # Local project imports
 from basic_utils.failure_check.count_files import count_files_in_directory
@@ -111,6 +111,10 @@ class HabitatEvalNode(Node):
 
         self.review_target = None
         self.review_ack = None
+        self.linked_view = None
+        self.evidence_pub = self.create_publisher(ReviewEvidence, '/habitat/review_evidence', qos)
+        self.create_subscription(DetectionAssociation, '/detector/associations',
+                                 self.association_callback, qos)
         self.review_result_pub = self.create_publisher(
             Int32MultiArray, "/habitat/review_result", qos)
         self.create_subscription(
@@ -163,6 +167,27 @@ class HabitatEvalNode(Node):
     def review_target_callback(self, msg):
         self.review_target = list(msg.data)
 
+    def association_callback(self, msg):
+        if self.linked_view is not None:
+            self.linked_view.associate(msg.episode_token, msg.observation_id,
+                                       list(msg.candidate_ids), list(msg.reasons), list(msg.bounds))
+            self.publish_evidence_readiness()
+
+    def publish_evidence_readiness(self):
+        if self.linked_view is None:
+            return
+        view = self.linked_view
+        ready = view.readiness()
+        msg = ReviewEvidence()
+        msg.episode_token = view.episode_token
+        msg.observation_id = view.last_association
+        msg.candidate_ids = [row[0] for row in ready]
+        msg.revisions = [row[1] for row in ready]
+        reliable, conflicts = view.stop_quality()
+        msg.reliable_candidate_ids = reliable
+        msg.conflicting_candidate_ids = conflicts
+        self.evidence_pub.publish(msg)
+
     def review_ack_callback(self, msg):
         self.review_ack = msg.data
 
@@ -173,10 +198,21 @@ class HabitatEvalNode(Node):
             if not rclpy.ok() or time.monotonic() > deadline:
                 raise RuntimeError("Missing selected-target metadata")
             rclpy.spin_once(self, timeout_sec=0.05)
+        # Association and review target travel on separate topics. Wait only at
+        # an actual review, not on the original navigation/exploration path.
+        self.wait_for_associations()
         target, self.review_target = self.review_target, None
         return target
 
+    def wait_for_associations(self):
+        deadline = time.monotonic() + 5
+        while self.linked_view is not None and self.linked_view.last_association < self.linked_view.step:
+            if not rclpy.ok() or time.monotonic() > deadline:
+                raise RuntimeError('Missing mapper evidence association at review/episode boundary')
+            rclpy.spin_once(self, timeout_sec=0.05)
+
     def submit_review(self, decision):
+        self.publish_evidence_readiness()
         self.review_ack = None
         self.publish_int32_array(self.review_result_pub, list(decision))
         deadline = time.monotonic() + 5
@@ -382,14 +418,23 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                                 env.current_episode.scene_id,
                                 env.current_episode.episode_id, label)
         view = None
+        node.linked_view = None
         if view_mode != "baseline":
             from vlm.active_view import SelectedTargetReviewer
             from vlm.utils.get_itm_message import itmclient
 
-            view = SelectedTargetReviewer(
+            reviewer_class = SelectedTargetReviewer
+            reviewer_options = {}
+            if getattr(view_cfg, 'linked_evidence', False):
+                from vlm.linked_review import LinkedTargetReviewer
+                reviewer_class = LinkedTargetReviewer
+                reviewer_options['episode_token'] = time.time_ns()
+            view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
                 label.split("|")[0].strip(), itmclient.itm_score,
-                video_output_path, num_total + 1)
+                video_output_path, num_total + 1, **reviewer_options)
+            if reviewer_options:
+                node.linked_view = view
             node.inspection_request = None
         node.review_target = None
         node.review_ack = None
@@ -398,6 +443,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         llm_answer, room, node.fusion_threshold = read_answer(
             llm_answer_path, llm_response_path, label, llm_client
         )
+        if node.linked_view is not None:
+            view.detector_threshold = node.fusion_threshold
 
         # Initialize video frame collection
         episode_video = None
@@ -540,6 +587,10 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             cld_with_score_msg.point_clouds = obj_point_cloud_list
             cld_with_score_msg.confidence_scores = score_list
             cld_with_score_msg.label_indices = label_list
+            if node.linked_view is not None:
+                cld_with_score_msg.episode_token = view.episode_token
+                cld_with_score_msg.observation_id = count_steps
+                cld_with_score_msg.header.stamp = node.get_clock().now().to_msg()
             node.cld_with_score_pub.publish(cld_with_score_msg)
 
             # Generate video frame
@@ -563,6 +614,11 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
 
         # Notify ROS system that current episode evaluation is complete
+        # Drain the final real frame before sealing its evidence or resetting the
+        # mapper. Otherwise a late callback can write after episode_end or be
+        # assigned by the next episode's freshly reset map.
+        node.wait_for_associations()
+        node.linked_view = None
         if view is not None:
             view.finish_episode()
         node.publish_int32(node.state_pub, HABITAT_STATE.EPISODE_FINISH)

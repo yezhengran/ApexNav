@@ -49,7 +49,8 @@ public:
   void inputDepthCloud2D(const pcl::PointCloud<pcl::PointXY>::Ptr& points,
       const Eigen::Vector3d& camera_pos, vector<Eigen::Vector2i>& free_grids);
   void inputObjectCloud2D(
-      const vector<DetectedObject>& detected_objects, vector<int>& object_cluster_ids);
+      const vector<DetectedObject>& detected_objects, vector<int>& object_cluster_ids,
+      vector<int>* source_cluster_ids = nullptr);
   void inputVirtualGround(const pcl::PointCloud<pcl::PointXY>::Ptr& points);
 
   // Coordinate transformation utilities

@@ -204,7 +204,8 @@ void SDFMap2D::inputVirtualGround(const pcl::PointCloud<pcl::PointXY>::Ptr& poin
 }
 
 void SDFMap2D::inputObjectCloud2D(
-    const vector<DetectedObject>& detected_objects, vector<int>& object_cluster_ids)
+    const vector<DetectedObject>& detected_objects, vector<int>& object_cluster_ids,
+    vector<int>* source_cluster_ids)
 {
   object_cluster_ids.clear();
   // Process each detected object and try to associate it with existing clusters
@@ -213,6 +214,9 @@ void SDFMap2D::inputObjectCloud2D(
       continue;
 
     int object_cluster_id = object_map2d_->searchSingleObjectCluster(detected_object);
+    if (source_cluster_ids && detected_object.source_index >= 0 &&
+        detected_object.source_index < static_cast<int>(source_cluster_ids->size()))
+      (*source_cluster_ids)[detected_object.source_index] = object_cluster_id;
     if (object_cluster_id != -1)
       object_cluster_ids.push_back(object_cluster_id);
   }

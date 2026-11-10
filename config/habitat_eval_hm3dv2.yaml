@@ -72,3 +72,5 @@ active_view:
   max_stationary_steps: 24
   recent_evidence: false  # A1: bounded recent crops and verification during observation
   turn_first: false       # A2: orient before translating; stop after 3 blocked advances
+  linked_evidence: false  # Explicit mapper source IDs and per-candidate keyframes
+  stop_review: false      # B only: original STOP with missing/conflicting evidence

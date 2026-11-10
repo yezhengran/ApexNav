@@ -17,9 +17,15 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   if (first_init) {
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
+    node_->declare_parameter("review.lineage", false);
+    node_->declare_parameter("review.stop_check", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("review.late_step", review_late_step_);
+  node_->get_parameter("review.lineage", review_lineage_);
+  node_->get_parameter("review.stop_check", review_stop_);
+  if (review_stop_ && (!review_enabled_ || !review_lineage_))
+    throw std::invalid_argument("STOP review requires linked selected-target review");
   if (review_late_step_ < 1) throw std::invalid_argument("review.late_step must be positive");
   review_step_ = 0;
   review_replan_ = false;
@@ -28,16 +34,42 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   ++review_episode_;
   review_resume_path_.clear();
   review_fallback_logged_.clear();
+  evidence_revisions_.clear();
+  reviewed_revisions_.clear();
+  reliable_evidence_.clear();
+  conflicting_evidence_.clear();
+  stop_reviewed_.clear();
+  evidence_observation_ = 0;
+  selected_mode_ = -1;
 
   /* Initialize main modules */
   expl_manager_.reset(new ExplorationManager);
   expl_manager_->initialize(node_);
+  expl_manager_->object_map2d_->stop_review_gating_ = review_stop_;
   visualization_.reset(new PlanningVisualization(node_));
   fp_->vis_scale_ = expl_manager_->sdf_map_->getResolution() * FSMConstants::VIS_SCALE_FACTOR;
 
   state_ = ROS_STATE::INIT;
 
   if (!first_init) return;  // Skip timer/sub/pub creation on re-init (episode reset)
+
+  evidence_sub_ = node_->create_subscription<plan_env::msg::ReviewEvidence>(
+      "/habitat/review_evidence", 10,
+      [this](const plan_env::msg::ReviewEvidence::SharedPtr msg) {
+        if (!review_lineage_ || !msg->episode_token ||
+            msg->episode_token != expl_manager_->object_map2d_->evidence_episode_token_ ||
+            msg->candidate_ids.size() != msg->revisions.size() ||
+            msg->observation_id < evidence_observation_) return;
+        evidence_observation_ = msg->observation_id;
+        reliable_evidence_.clear();
+        conflicting_evidence_.clear();
+        for (int id : msg->reliable_candidate_ids) if (id > 0) reliable_evidence_.insert(id - 1);
+        for (int id : msg->conflicting_candidate_ids) if (id > 0) conflicting_evidence_.insert(id - 1);
+        evidence_revisions_.clear();
+        for (size_t i = 0; i < msg->candidate_ids.size(); ++i)
+          if (msg->candidate_ids[i] > 0 && msg->revisions[i] <= msg->observation_id)
+            evidence_revisions_[msg->candidate_ids[i] - 1] = msg->revisions[i];
+      });
 
   /* ROS2 Timer */
   exec_timer_ = node_->create_wall_timer(
@@ -95,13 +127,15 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
         const bool fallback = review_step_ >= review_late_step_ ||
             review_pending_selection_ == EXPL_RESULT::SEARCH_SUSPICIOUS_OBJECT ||
             review_pending_selection_ == EXPL_RESULT::SEARCH_EXTREME;
-        if (msg->data[1] == ObjectMap2D::UNCERTAIN && fallback &&
+        const bool inconclusive = msg->data[1] == ObjectMap2D::UNCERTAIN ||
+            msg->data[1] == ObjectMap2D::PENDING_EVIDENCE;
+        if (inconclusive && fallback &&
             review_fallback_logged_.insert(review_pending_id_).second)
           RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
               review_episode_, msg->data[0],
               review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
         fd_->final_result_ = (msg->data[1] == ObjectMap2D::CONFIRMED ||
-            (msg->data[1] == ObjectMap2D::UNCERTAIN && fallback)) ?
+            (inconclusive && fallback)) ?
             FINAL_RESULT::SEARCH_OBJECT : FINAL_RESULT::EXPLORE;
         fd_->replan_flag_ = true;
         review_replan_ = true;  // A revoked target must not reuse its old route.
@@ -243,6 +277,7 @@ int ExplorationFSM::callActionPlanner()
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
       (current_pos - expl_manager_->ed_->next_pos_).norm() < reach_distance) {
+    if (maybeReviewStop()) return FINAL_RESULT::SEARCH_OBJECT;
     RCLCPP_ERROR(node_->get_logger(), "Reach the object successfully!!!");
     final_res = FINAL_RESULT::REACH_OBJECT;
     return final_res;
@@ -255,6 +290,7 @@ int ExplorationFSM::callActionPlanner()
       last_action == ACTION::MOVE_FORWARD) {
     if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
         (current_pos - expl_manager_->ed_->next_pos_).norm() < soft_reach_distance) {
+      if (maybeReviewStop()) return FINAL_RESULT::SEARCH_OBJECT;
       RCLCPP_ERROR(node_->get_logger(), "Reach the object successfully!!!");
       final_res = FINAL_RESULT::REACH_OBJECT;
       return final_res;
@@ -355,6 +391,7 @@ int ExplorationFSM::callActionPlanner()
     fd_->replan_flag_ = true;
   }
   review_replan_ = false;
+  selected_mode_ = expl_res;
   /*******  Decide whether to replan path (stability heuristic) END *******/
 
   // Publish exploration result to monitor
@@ -461,18 +498,54 @@ bool ExplorationFSM::maybeReviewSelected(int exploration_result)
   // High-confidence selection retains the complete original path.
   if (data[1] >= data[2]) return false;
   const int status = objects->reviewState(id);
-  if (status == ObjectMap2D::UNCERTAIN && review_fallback_logged_.insert(id).second) {
+  const bool inconclusive = status == ObjectMap2D::UNCERTAIN ||
+      status == ObjectMap2D::PENDING_EVIDENCE;
+  if (inconclusive && review_fallback_logged_.insert(id).second) {
     RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
         review_episode_, id + 1,
         review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
   }
-  if (status != ObjectMap2D::UNREVIEWED) return false;
+  if (status != ObjectMap2D::UNREVIEWED &&
+      !(review_lineage_ && inconclusive && evidence_revisions_[id] > reviewed_revisions_[id]))
+    return false;
+  reviewed_revisions_[id] = evidence_revisions_[id];
+  return requestReview(id, exploration_result, data, false);
+}
+
+bool ExplorationFSM::maybeReviewStop()
+{
+  if (!review_stop_) return false;
+  const int id = expl_manager_->ed_->selected_object_id_;
+  vector<double> info;
+  if (!expl_manager_->object_map2d_->reviewInfo(id, info)) {
+    RCLCPP_INFO(node_->get_logger(), "[Stop review bypass] reason=missing_object_metadata step=%d", review_step_);
+    return false;
+  }
+  // One bounded STOP review per candidate; inconclusive results retain the
+  // original late/no-frontier fallback. Do not create a zero-step retry loop.
+  if (stop_reviewed_.count(id)) return false;
+  const bool fresh = evidence_observation_ > 0 &&
+      evidence_observation_ + 2 >= static_cast<uint32_t>(review_step_);
+  const bool conflict = fresh && conflicting_evidence_.count(id);
+  if (fresh && reliable_evidence_.count(id) && !conflict) {
+    RCLCPP_INFO(node_->get_logger(), "[Stop review bypass] id=%d reason=current_linked_evidence step=%d", id + 1, review_step_);
+    return false;
+  }
+  stop_reviewed_.insert(id);
+  RCLCPP_INFO(node_->get_logger(), "[Stop review trigger] id=%d reason=%s step=%d", id + 1,
+      conflict ? "category_conflict" : "missing_current_evidence", review_step_);
+  return requestReview(id, selected_mode_, info, true);
+}
+
+bool ExplorationFSM::requestReview(int id, int exploration_result, const vector<double>& data, bool at_stop)
+{
   review_pending_id_ = id;
   review_pending_selection_ = exploration_result;
   review_resume_pos_ = expl_manager_->ed_->next_pos_;
   review_resume_path_ = expl_manager_->ed_->next_best_path_;
   std_msgs::msg::Float64MultiArray target;
   target.data = data;
+  if (at_stop) target.data.push_back(1.0);
   review_target_pub_->publish(target);
   fd_->newest_action_ = ACTION::REVIEW_TARGET;
   RCLCPP_INFO(node_->get_logger(),

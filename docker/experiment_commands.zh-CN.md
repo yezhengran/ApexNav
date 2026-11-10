@@ -61,6 +61,8 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 
 2026-11-09 复核消融新增 `--review-profile legacy|evidence|evidence_turn`：默认 legacy 保留原行为，evidence 为近期证据缓存/途中复核，evidence_turn 另加原地对准/受阻早退出；后两者仅用于 `--method selected_review`。`--episode-index N` 是零基数据集索引，只允许新目录、`--episodes 1`，标记为独立诊断，不允许与 `--resume` 同用。这轮已完整结束且未通过扩展门槛，下一轮先对齐方法，参见 [最终报告](../docs/experiments/2026-11-09-review-evidence-results.zh-CN.md)。
 
+2026-11-10 增加独立配置 `linked`（A，地图来源关联）与 `linked_stop`（B，停止前缺证据/冲突复核），均默认关闭；ROS 消息变化需要重新构建。本轮 45 回合已经结束：baseline/A/B 门槛为 9/10、10/10、7/10。A 门槛零额外复核，B 未过门槛，当前不重跑或扩展。结果与待对齐的下一方案见 [A/B 最终报告](../docs/experiments/2026-11-10-linked-review-results.zh-CN.md)。
+
 仅对原规划器选中目标复核的新方案，先跑同集 10 回合开发集；**至少 8/10 成功且不低于基线后才能扩到 50**。350/400 步分别使用独立目录，阈值修改也使用新目录（详见 [新方案](../docs/experiments/2026-11-05-selected-target-review-plan.zh-CN.md)）：
 
 ```bash

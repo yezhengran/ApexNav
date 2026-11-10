@@ -19,6 +19,8 @@ def generate_launch_description():
 
     review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
     review_late_step_arg = DeclareLaunchArgument('review_late_step', default_value='350')
+    review_lineage_arg = DeclareLaunchArgument('review_lineage', default_value='false')
+    review_stop_arg = DeclareLaunchArgument('review_stop', default_value='false')
 
     # Declare launch arguments
     map_size_x_arg = DeclareLaunchArgument(
@@ -77,6 +79,8 @@ def generate_launch_description():
             'is_real_world_': LaunchConfiguration('is_real_world'),
             'review_enabled_': LaunchConfiguration('review_enabled'),
             'review_late_step_': LaunchConfiguration('review_late_step'),
+            'review_lineage_': LaunchConfiguration('review_lineage'),
+            'review_stop_': LaunchConfiguration('review_stop'),
             'map_size_x_': LaunchConfiguration('map_size_x'),
             'map_size_y_': LaunchConfiguration('map_size_y'),
             'odometry_topic_': LaunchConfiguration('odom_topic'),
@@ -96,6 +100,8 @@ def generate_launch_description():
         is_real_world_arg,
         review_enabled_arg,
         review_late_step_arg,
+        review_lineage_arg,
+        review_stop_arg,
         odom_topic_arg,
         sensor_pose_topic_arg,
         depth_topic_arg,

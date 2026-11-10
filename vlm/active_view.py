@@ -67,7 +67,7 @@ class SelectedTargetReviewer:
     rejected=3. Observations never filter or alter the original map input.
     """
 
-    CONFIRMED, UNCERTAIN, REJECTED = 1, 2, 3
+    CONFIRMED, UNCERTAIN, REJECTED, PENDING_EVIDENCE = 1, 2, 3, 4
 
     def __init__(self, cfg, sensor, label, verifier, directory, episode):
         self.cfg, self.sensor, self.label, self.verifier = cfg, sensor, label, verifier
@@ -123,6 +123,10 @@ class SelectedTargetReviewer:
             self.cache = [e for e in self.cache if step - e['step'] <= self.cache_steps]
             self.cache.extend(e for e in self.current if self._usable(e))
             self.cache = self.cache[-48:]  # <= 9 MiB of RGB pixels at 256x256
+        return self._advance_inspection(previous_pose, action)
+
+    def _advance_inspection(self, previous_pose, action):
+        step = self.step
         if self.active is not None:
             target = self.active
             self.stats['inspection_actions'] += 1
@@ -241,7 +245,9 @@ class SelectedTargetReviewer:
                    mask_pixels=evidence['pixels'],
                    partial_negative_withheld=bool(self.recent_evidence and not evidence['complete']
                                                   and score <= self.cfg.itm_reject_threshold),
-                   detection_label=evidence['label'], detection_center=evidence['center'].tolist())
+                   detection_label=evidence['label'],
+                   detection_center=(evidence['center'].tolist()
+                                     if evidence['center'] is not None else None))
         return decision
 
     def _finish(self, reason):
@@ -252,7 +258,7 @@ class SelectedTargetReviewer:
     def _complete(self, decision, reason):
         target = self.selected
         name = {self.CONFIRMED: 'confirmed', self.UNCERTAIN: 'uncertain',
-                self.REJECTED: 'rejected'}[decision]
+                self.REJECTED: 'rejected', self.PENDING_EVIDENCE: 'pending_evidence'}[decision]
         self.stats[name] += 1
         self.event('review_finished', candidate=target['id'], decision=name, reason=reason)
         self.selected = self.active = None
@@ -269,13 +275,12 @@ class SelectedTargetReviewer:
         ident, confidence, threshold, cx, cy, extent, x0, y0, x1, y1 = data
         if ident < 1 or int(ident) != ident or x0 > x1 or y0 > y1 or extent < 0:
             raise ValueError('Invalid selected-target geometry or ID')
-        if confidence >= threshold:
+        if confidence >= threshold and not self._allow_high_confidence():
             raise ValueError('High-confidence objects must retain the original planner path')
         self.selected = {'id': int(ident), 'center': np.array([cx, cy]),
                          'low': np.array([x0, y0]), 'high': np.array([x1, y1]),
                          'extent': float(np.clip(extent, 0.15, 3.0)),
-                         'used': set(), 'calls': 0, 'blocked_forward': 0,
-                         'last_evidence': None}
+                         'blocked_forward': 0, **self._target_history(int(ident))}
         self.stats['selected_targets'] += 1
         self.event('selected_target', candidate=int(ident), fused_confidence=confidence,
                    original_threshold=threshold, center=[cx, cy], extent=extent,
@@ -283,6 +288,8 @@ class SelectedTargetReviewer:
         decision = self._verify('selected')
         if decision != self.UNCERTAIN:
             return self._complete(decision, 'selected_view_decisive')
+        if not self._may_inspect():
+            return self._complete(decision, 'retry_without_new_detour')
         self.active = self.selected
         self.active.update(radius=observation_radius(extent), started=self.step,
                            last_motion=self.step, last_position=np.array(self.pose[:2]))
@@ -290,6 +297,15 @@ class SelectedTargetReviewer:
         self.event('inspection_requested', candidate=int(ident),
                    radius=self.active['radius'], center=[cx, cy], extent=extent)
         return None
+
+    def _target_history(self, ident):
+        return {'used': set(), 'calls': 0, 'last_evidence': None}
+
+    def _may_inspect(self):
+        return True
+
+    def _allow_high_confidence(self):
+        return False
 
     def request(self):
         if self.active is None:

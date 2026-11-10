@@ -9,3 +9,8 @@ float32[] confidence_scores
 
 # List of label indices
 int32[] label_indices
+
+# Optional evidence provenance. Zero keeps the original mapping-only protocol.
+uint64 episode_token
+uint32 observation_id
+std_msgs/Header header

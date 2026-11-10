@@ -24,6 +24,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <std_msgs/msg/float64.hpp>
+#include <plan_env/msg/detection_association.hpp>
 
 // PCL for point cloud processing
 #include <pcl/filters/voxel_grid.h>
@@ -128,6 +129,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr over_depth_object_cloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr value_map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr confidence_map_pub_;
+  rclcpp::Publisher<plan_env::msg::DetectionAssociation>::SharedPtr association_pub_;
 
   // ROS2 subscribers for sensor data
   rclcpp::Subscription<plan_env::msg::MultipleMasksWithConfidence>::SharedPtr detected_object_cloud_sub_;

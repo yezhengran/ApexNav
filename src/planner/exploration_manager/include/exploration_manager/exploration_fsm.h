@@ -10,6 +10,7 @@
 #include <vector>
 #include <chrono>
 #include <set>
+#include <unordered_map>
 #include <stdexcept>
 
 // ROS2 core
@@ -23,6 +24,7 @@
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <exploration_manager/active_view.h>
+#include <plan_env/msg/review_evidence.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
 using Eigen::Vector2d;
@@ -102,7 +104,13 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr inspection_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
-  bool review_enabled_ = false, review_replan_ = false;
+  bool review_enabled_ = false, review_replan_ = false, review_lineage_ = false;
+  std::unordered_map<int, uint32_t> evidence_revisions_, reviewed_revisions_;
+  bool review_stop_ = false;
+  uint32_t evidence_observation_ = 0;
+  std::set<int> reliable_evidence_, conflicting_evidence_, stop_reviewed_;
+  int selected_mode_ = -1;
+  rclcpp::Subscription<plan_env::msg::ReviewEvidence>::SharedPtr evidence_sub_;
   int review_late_step_ = 350, review_step_ = 0, review_pending_id_ = -1, review_episode_ = 0;
   int review_pending_selection_ = -1;
   Vector2d review_resume_pos_ = Vector2d::Zero();
@@ -121,6 +129,8 @@ private:
   int callActionPlanner();
   int planInspection();
   bool maybeReviewSelected(int exploration_result);
+  bool maybeReviewStop();
+  bool requestReview(int id, int exploration_result, const vector<double>& info, bool at_stop);
   int planNextBestAction(Vector2d current_pos, double current_yaw, const vector<Vector2d>& path,
       bool need_safety = true);
   Vector2d selectLocalTarget(
