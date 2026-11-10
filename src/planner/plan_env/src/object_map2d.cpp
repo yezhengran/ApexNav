@@ -648,6 +648,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
       // Include only high-confidence objects with primary label (0)
       const int review = reviewState(object.id_);
       const bool waiting = stop_review_gating_ && !review_late_eligible_ &&
+          !review_stop_preserved_.count(object.id_) &&
           (review == UNCERTAIN || review == PENDING_EVIDENCE);
       if ((!waiting && best_label == 0 && isConfidenceObject(object)) || review == CONFIRMED ||
           (review_late_eligible_ && (review == UNCERTAIN || review == PENDING_EVIDENCE)))
@@ -683,11 +684,16 @@ int ObjectMap2D::reviewState(int object_id) const
   return found == review_states_.end() ? UNREVIEWED : found->second;
 }
 
-bool ObjectMap2D::setReviewState(int object_id, int state)
+bool ObjectMap2D::setReviewState(int object_id, int state, bool preserve_stop)
 {
   if (object_id < 0 || object_id >= static_cast<int>(objects_.size()) ||
       state < CONFIRMED || state > PENDING_EVIDENCE) return false;
   review_states_[object_id] = state;
+  // Keep the semantic result; only waive the extra STOP-review hold for this candidate.
+  if (preserve_stop && (state == UNCERTAIN || state == PENDING_EVIDENCE))
+    review_stop_preserved_.insert(object_id);
+  else
+    review_stop_preserved_.erase(object_id);
   return true;
 }
 

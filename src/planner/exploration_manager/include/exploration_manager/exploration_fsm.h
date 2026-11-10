@@ -106,7 +106,8 @@ private:
   ActiveView active_view_;
   bool review_enabled_ = false, review_replan_ = false, review_lineage_ = false;
   std::unordered_map<int, uint32_t> evidence_revisions_, reviewed_revisions_;
-  bool review_stop_ = false;
+  bool review_stop_ = false, review_preserve_stop_ = false;
+  bool review_pending_high_confidence_stop_ = false;
   uint32_t evidence_observation_ = 0;
   std::set<int> reliable_evidence_, conflicting_evidence_, stop_reviewed_;
   int selected_mode_ = -1;

@@ -86,7 +86,7 @@ class BatchTest(unittest.TestCase):
         self.assertFalse(any("active_view" in item for item in command))
 
     def test_ablation_command_preserves_thresholds_and_single_index(self):
-        for profile in ('evidence', 'evidence_turn', 'linked', 'linked_stop'):
+        for profile in ('evidence', 'evidence_turn', 'linked', 'linked_stop', 'linked_stop_preserve'):
             command = evaluation_command('hm3dv2', 1, Path('/tmp/a'), True,
                                          method='selected_review', episode_index=66,
                                          review_profile=profile, uncertain_after_steps=400)
@@ -95,8 +95,15 @@ class BatchTest(unittest.TestCase):
             self.assertIn(f"active_view.turn_first={str(profile == 'evidence_turn').lower()}", command)
             self.assertIn('active_view.itm_confirm_threshold=0.65', command)
             self.assertIn('active_view.itm_reject_threshold=0.2', command)
-            self.assertEqual('active_view.linked_evidence=true' in command, profile in ('linked', 'linked_stop'))
-            self.assertEqual('active_view.stop_review=true' in command, profile == 'linked_stop')
+            self.assertEqual('active_view.linked_evidence=true' in command, profile in ('linked', 'linked_stop', 'linked_stop_preserve'))
+            self.assertEqual('active_view.stop_review=true' in command, profile in ('linked_stop', 'linked_stop_preserve'))
+
+    def test_stop_decision_ablation_keeps_observations_identical(self):
+        commands = [evaluation_command('hm3dv2', 10, Path('/tmp/a'), True,
+                                      method='selected_review', review_profile=profile,
+                                      uncertain_after_steps=400)
+                    for profile in ('linked_stop', 'linked_stop_preserve')]
+        self.assertEqual(*commands)
 
     def test_dirty_source_requires_complete_explicit_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:

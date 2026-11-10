@@ -2,7 +2,21 @@
 
 更新日期：2026-11-10。先读根目录 [AGENTS.md](../AGENTS.md)，再按本文继续。
 
-## 最新状态：A/B 整轮 45 回合完成，B 未过门槛，等待对齐
+## 最新状态：STOP 决策 25 回合结束；Qwen API 与观测改进待配置/对齐
+
+2026-11-10 用户确认的独立 STOP 决策修正已完成：五例诊断加新 baseline/候选各前十，共 25 回合、七目录 completed/0；**baseline 10/10、linked_stop_preserve 9/10，SPL 64.42%/57.60%，未达不低于基线，不扩 100。** 实际新增复核共 20 次，均不确定；门槛第三例 PENDING、零 VLM 调用后在错误任务位置停止。详细失败与机制见 [本轮最终报告](experiments/2026-11-10-stop-decision-results.zh-CN.md)。评测/规划器退出，原四模型停止；一次性脚本完整归档验证后清理，勿重复启动。
+
+工作分支 `codex/objectnav-review-evidence-fix`，运行基底 `341990bb4ae92581b3872827ad43342d8304bcb5`，未提交运行快照 `1777ebfecc960dce972c089a2c965ffc3456a3287d5535eb28f703167f8a3bf2`；158 源文件、39 二进制冻结。原分支保留 e25740f。整轮后统一提交代码/最终报告，不把事后提交冒充运行 provenance。
+
+**最新用户要求：先分析基线失败与观测方法；新增复核改用 Qwen，不用图文匹配模型。** 用户先要求本地 Qwen，随后明确暂停下载、改用 API 并删除本地 Qwen。已停止下载进程，删除本次约 1.52 GB 未完成权重/续传文件及约 0.36 GB 专用环境；基线 PyTorch/transformers/accelerate 版本核验不变。删除记录在 `experiment_notes/validation/20261110-local-qwen/download-status.json`，不得重新下载或启动本地 Qwen。
+
+API 方向沿用用户此前选定的百炼 Qwen3-VL-Plus，费用上限 20 元；尚无 API 调用，当前本地未配置 DASHSCOPE_API_KEY/BASE_URL，不在聊天收密钥。先用固定图像作离线对照，更换模型、输入上下文和调整阈值分别验证；新增复核不用 BLIP2，但原 ApexNav 探索 ITM 暂保留。尚未将 Qwen 接入在线导航。
+
+[失败再分析与具体观测建议](experiments/2026-11-10-observation-failure-review.zh-CN.md)已写出：原 100 是 selected_review 75/100，**不是纯 baseline100**；25 失败为超时12、错误任务位置STOP8、受阻/无前沿3、高度筛查2。新增复核只覆盖失败72/99且均零调用，不能将这些失败统称 VLM 误判。纯 baseline100 缺失。正在向用户对齐是否先补同固定 baseline100，以及以图像可见性/截断/遮挡选择局部短程观测（拟上限8动作、受阻早退），尚未应用新观测运动或扩大评测。先查看最新用户回复再继续。
+
+以下为历史状态，不覆盖上方当前指令。
+
+## 历史：A/B 整轮 45 回合完成，B 未过门槛，等待对齐
 
 2026-11-10 用户确认的“先 A，再独立 B”已完整结束：五例旧 evidence/A/B 各一次，新 baseline/A/B 各固定前十，共 45 回合、18 个目录，均 `completed / 0`。**baseline 9/10、A 10/10、B 7/10；SPL 分别 56.77%/61.82%/21.63%。A 门槛零额外复核，不能宣称 VLM 收益；B 未过门槛，不扩展 100。** 评测/规划器退出、四模型 DOWN。完整结果见 [A/B 最终报告](experiments/2026-11-10-linked-review-results.zh-CN.md)。
 

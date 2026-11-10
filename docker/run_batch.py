@@ -57,10 +57,10 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_profile != "legacy":
             command.extend(["active_view.recent_evidence=true",
                             f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
-        if review_profile in ("linked", "linked_stop"):
+        if review_profile in ("linked", "linked_stop", "linked_stop_preserve"):
             prefix = '+' if dataset != 'hm3dv2' else ''
             command.extend([f"{prefix}active_view.linked_evidence=true",
-                            f"{prefix}active_view.stop_review={str(review_profile == 'linked_stop').lower()}"])
+                            f"{prefix}active_view.stop_review={str(review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}"])
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
@@ -157,7 +157,7 @@ def main():
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop"],
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
     parser.add_argument("--reject-threshold", type=float, default=0.20)
@@ -288,8 +288,9 @@ def main():
                     ["ros2", "launch", "exploration_manager", "exploration.launch.py",
                      f"review_enabled:={str(args.method == 'selected_review').lower()}",
                      f"review_late_step:={args.uncertain_after_steps}",
-                     f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop')).lower()}",
-                     f"review_stop:={str(args.review_profile == 'linked_stop').lower()}"],
+                     f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve')).lower()}",
+                     f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
+                     f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}"],
                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                 )
             time.sleep(3)

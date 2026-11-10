@@ -19,11 +19,15 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
     node_->declare_parameter("review.stop_check", false);
+    node_->declare_parameter("review.preserve_stop", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("review.late_step", review_late_step_);
   node_->get_parameter("review.lineage", review_lineage_);
   node_->get_parameter("review.stop_check", review_stop_);
+  node_->get_parameter("review.preserve_stop", review_preserve_stop_);
+  if (review_preserve_stop_ && !review_stop_)
+    throw std::invalid_argument("Preserving STOP eligibility requires STOP review");
   if (review_stop_ && (!review_enabled_ || !review_lineage_))
     throw std::invalid_argument("STOP review requires linked selected-target review");
   if (review_late_step_ < 1) throw std::invalid_argument("review.late_step must be positive");
@@ -31,6 +35,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   review_replan_ = false;
   review_pending_id_ = -1;
   review_pending_selection_ = -1;
+  review_pending_high_confidence_stop_ = false;
   ++review_episode_;
   review_resume_path_.clear();
   review_fallback_logged_.clear();
@@ -114,9 +119,17 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
       "/habitat/review_result", 10,
       [this](const std_msgs::msg::Int32MultiArray::SharedPtr msg) {
         if (!review_enabled_ || msg->data.size() != 2 || review_pending_id_ < 0 ||
-            msg->data[0] != review_pending_id_ + 1 ||
-            !expl_manager_->object_map2d_->setReviewState(review_pending_id_, msg->data[1])) {
+            msg->data[0] != review_pending_id_ + 1) {
           RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review result");
+          return;
+        }
+        const bool inconclusive = msg->data[1] == ObjectMap2D::UNCERTAIN ||
+            msg->data[1] == ObjectMap2D::PENDING_EVIDENCE;
+        const bool preserve_stop = review_preserve_stop_ &&
+            review_pending_high_confidence_stop_ && inconclusive;
+        if (!expl_manager_->object_map2d_->setReviewState(
+                review_pending_id_, msg->data[1], preserve_stop)) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review state");
           return;
         }
         RCLCPP_INFO(node_->get_logger(), "[Review decision] episode=%d id=%d state=%d step=%d",
@@ -127,21 +140,24 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
         const bool fallback = review_step_ >= review_late_step_ ||
             review_pending_selection_ == EXPL_RESULT::SEARCH_SUSPICIOUS_OBJECT ||
             review_pending_selection_ == EXPL_RESULT::SEARCH_EXTREME;
-        const bool inconclusive = msg->data[1] == ObjectMap2D::UNCERTAIN ||
-            msg->data[1] == ObjectMap2D::PENDING_EVIDENCE;
+        if (preserve_stop)
+          RCLCPP_INFO(node_->get_logger(), "[Review preserve STOP] episode=%d id=%d state=%d step=%d",
+              review_episode_, msg->data[0], msg->data[1], review_step_);
         if (inconclusive && fallback &&
             review_fallback_logged_.insert(review_pending_id_).second)
           RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
               review_episode_, msg->data[0],
               review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
         fd_->final_result_ = (msg->data[1] == ObjectMap2D::CONFIRMED ||
-            (inconclusive && fallback)) ?
+            (inconclusive && (fallback || preserve_stop))) ?
             FINAL_RESULT::SEARCH_OBJECT : FINAL_RESULT::EXPLORE;
         fd_->replan_flag_ = true;
         review_replan_ = true;  // A revoked target must not reuse its old route.
         std_msgs::msg::Int32 ack;
         ack.data = msg->data[0];
         review_pending_id_ = -1;
+        review_pending_high_confidence_stop_ = false;
+        // SEARCH_OBJECT returns through the original arrival checks; never issue STOP here.
         review_ack_pub_->publish(ack);
       });
 
@@ -541,6 +557,7 @@ bool ExplorationFSM::requestReview(int id, int exploration_result, const vector<
 {
   review_pending_id_ = id;
   review_pending_selection_ = exploration_result;
+  review_pending_high_confidence_stop_ = at_stop && data[1] >= data[2];
   review_resume_pos_ = expl_manager_->ed_->next_pos_;
   review_resume_path_ = expl_manager_->ed_->next_best_path_;
   std_msgs::msg::Float64MultiArray target;

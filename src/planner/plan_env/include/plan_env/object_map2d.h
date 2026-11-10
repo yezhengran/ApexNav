@@ -23,6 +23,7 @@
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/common/common.h>
 #include <unordered_map>
+#include <unordered_set>
 
 using Eigen::Vector2d;
 using Eigen::Vector2i;
@@ -122,7 +123,7 @@ public:
   uint64_t evidence_episode_token_ = 0;  // Reset with this episode's object map.
   bool stop_review_gating_ = false;
   int reviewState(int object_id) const;
-  bool setReviewState(int object_id, int state);
+  bool setReviewState(int object_id, int state, bool preserve_stop = false);
   bool reviewInfo(int object_id, vector<double>& data) const;
   void setLateReviewEligibility(bool enabled) { review_late_eligible_ = enabled; }
   void getObjects(
@@ -181,6 +182,7 @@ private:
   vector<int> object_indexs_;      ///< Grid cell to object ID mapping
   vector<char> object_buffer_;     ///< Object occupancy grid buffer
   std::unordered_map<int, int> review_states_;
+  std::unordered_set<int> review_stop_preserved_;
   bool review_late_eligible_ = false;
   vector<ObjectCluster> objects_;  ///< Collection of all object clusters
 

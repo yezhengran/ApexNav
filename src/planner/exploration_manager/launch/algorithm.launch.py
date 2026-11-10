@@ -22,6 +22,7 @@ def generate_launch_description():
     review_late_step_arg = DeclareLaunchArgument('review_late_step_', default_value='350')
     review_lineage_arg = DeclareLaunchArgument('review_lineage_', default_value='false')
     review_stop_arg = DeclareLaunchArgument('review_stop_', default_value='false')
+    review_preserve_stop_arg = DeclareLaunchArgument('review_preserve_stop_', default_value='false')
 
     # Declare launch arguments
     map_size_x_arg = DeclareLaunchArgument('map_size_x_', default_value='80.0')
@@ -59,6 +60,7 @@ def generate_launch_description():
                 'review.late_step': LaunchConfiguration('review_late_step_'),
                 'review.lineage': LaunchConfiguration('review_lineage_'),
                 'review.stop_check': LaunchConfiguration('review_stop_'),
+                'review.preserve_stop': LaunchConfiguration('review_preserve_stop_'),
 
                 # Mapping - SDF Map (C++ uses dots)
                 'sdf_map.ray_mode': 0,
@@ -155,6 +157,7 @@ def generate_launch_description():
         review_late_step_arg,
         review_lineage_arg,
         review_stop_arg,
+        review_preserve_stop_arg,
         # Nodes
         exploration_node,
         tsp_solver_node,

@@ -63,6 +63,8 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 
 2026-11-10 增加独立配置 `linked`（A，地图来源关联）与 `linked_stop`（B，停止前缺证据/冲突复核），均默认关闭；ROS 消息变化需要重新构建。本轮 45 回合已经结束：baseline/A/B 门槛为 9/10、10/10、7/10。A 门槛零额外复核，B 未过门槛，当前不重跑或扩展。结果与待对齐的下一方案见 [A/B 最终报告](../docs/experiments/2026-11-10-linked-review-results.zh-CN.md)。
 
+2026-11-10 增加 `linked_stop_preserve`，仅修正原高置信 STOP 不确定/缺证据后的资格保留，实际停止仍经过原到达检查。该轮 25 回合已结束，baseline10/10、候选9/10，未过门槛；不要对原目录重跑。详见 [STOP 决策最终报告](../docs/experiments/2026-11-10-stop-decision-results.zh-CN.md)。用户最新要求使用 Qwen API 复核并优先分析观测（本地 Qwen 下载已停止并删除）；新的长实验安排以交接与用户回复为准。
+
 仅对原规划器选中目标复核的新方案，先跑同集 10 回合开发集；**至少 8/10 成功且不低于基线后才能扩到 50**。350/400 步分别使用独立目录，阈值修改也使用新目录（详见 [新方案](../docs/experiments/2026-11-05-selected-target-review-plan.zh-CN.md)）：
 
 ```bash
