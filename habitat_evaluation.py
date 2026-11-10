@@ -328,6 +328,12 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
     view_mode = view_cfg.mode if view_cfg else "baseline"
     if view_mode not in ("baseline", "selected_review"):
         raise ValueError(f"Unknown active_view mode: {view_mode}")
+    review_verifier = None
+    if view_mode != 'baseline' and getattr(view_cfg, 'backend', 'blip2') == 'qwen':
+        if not getattr(view_cfg, 'linked_evidence', False):
+            raise ValueError('Qwen verification requires explicit linked image evidence')
+        from vlm.qwen_review import QwenReviewer
+        review_verifier = QwenReviewer(view_cfg.qwen_budget_ledger, view_cfg.qwen_model)
 
     llm_cfg = cfg.llm
     llm_client = llm_cfg.llm_client
@@ -431,7 +437,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 reviewer_options['episode_token'] = time.time_ns()
             view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
-                label.split("|")[0].strip(), itmclient.itm_score,
+                label.split("|")[0].strip(), review_verifier or itmclient.itm_score,
                 video_output_path, num_total + 1, **reviewer_options)
             if reviewer_options:
                 node.linked_view = view

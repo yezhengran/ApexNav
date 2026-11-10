@@ -65,6 +65,9 @@ test_epi_num: -1
 # Opt-in DynZSON-inspired experiment; baseline never constructs this controller.
 active_view:
   mode: baseline  # baseline, selected_review
+  backend: blip2  # qwen is an explicit extra-review-only experiment
+  qwen_model: qwen3-vl-plus
+  qwen_budget_ledger: ""
   itm_confirm_threshold: 0.65
   itm_reject_threshold: 0.20
   uncertain_after_steps: 350

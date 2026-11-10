@@ -222,29 +222,42 @@ class SelectedTargetReviewer:
         crop_path = self.directory / f"candidate-{target['id']:03d}-{phase}-{target['calls']:02d}.png"
         Image.fromarray(evidence['crop']).save(crop_path)
         started = time.monotonic()
-        score = float(self.verifier(evidence['crop'], f'A photo of a {self.label}.'))
-        if not math.isfinite(score) or not 0 <= score <= 1:
-            raise ValueError('VLM ITM score must be finite and in [0, 1]')
+        qwen = getattr(self.cfg, 'backend', 'blip2') == 'qwen'
+        model_reply = None
+        if qwen:
+            model_reply = self.verifier(evidence['crop'], self.label)
+            decision = {'confirmed': self.CONFIRMED, 'uncertain': self.UNCERTAIN,
+                        'rejected': self.REJECTED}[model_reply['decision']]
+            partial_negative = decision == self.REJECTED and not evidence['complete']
+            if partial_negative:
+                decision = self.UNCERTAIN
+            score = None  # Language decisions are not fabricated ITM probabilities.
+        else:
+            score = float(self.verifier(evidence['crop'], f'A photo of a {self.label}.'))
+            if not math.isfinite(score) or not 0 <= score <= 1:
+                raise ValueError('VLM ITM score must be finite and in [0, 1]')
+            partial_negative = bool(self.recent_evidence and not evidence['complete']
+                                    and score <= self.cfg.itm_reject_threshold)
+            if score >= self.cfg.itm_confirm_threshold:
+                decision = self.CONFIRMED
+            elif score <= self.cfg.itm_reject_threshold and not partial_negative:
+                decision = self.REJECTED
+            else:
+                decision = self.UNCERTAIN
         seconds = time.monotonic() - started
         self.stats['vlm_calls'] += 1
         self.stats['vlm_seconds'] += seconds
         target['calls'] += 1
         target['used'].add(evidence['key'])
         target['last_evidence'] = evidence
-        if score >= self.cfg.itm_confirm_threshold:
-            decision = self.CONFIRMED
-        elif score <= self.cfg.itm_reject_threshold and (not self.recent_evidence or evidence['complete']):
-            decision = self.REJECTED
-        else:
-            decision = self.UNCERTAIN
         self.event('verification', candidate=target['id'], phase=phase, score=score,
-                   decision=decision, confirm_threshold=self.cfg.itm_confirm_threshold,
-                   reject_threshold=self.cfg.itm_reject_threshold, seconds=seconds,
+                   decision=decision, backend='qwen' if qwen else 'blip2', model_reply=model_reply,
+                   confirm_threshold=None if qwen else self.cfg.itm_confirm_threshold,
+                   reject_threshold=None if qwen else self.cfg.itm_reject_threshold, seconds=seconds,
                    crop=str(crop_path), evidence_step=evidence['step'], pose=evidence['pose'],
                    evidence_age=self.step - evidence['step'], complete=evidence['complete'],
                    mask_pixels=evidence['pixels'],
-                   partial_negative_withheld=bool(self.recent_evidence and not evidence['complete']
-                                                  and score <= self.cfg.itm_reject_threshold),
+                   partial_negative_withheld=partial_negative,
                    detection_label=evidence['label'],
                    detection_center=(evidence['center'].tolist()
                                      if evidence['center'] is not None else None))

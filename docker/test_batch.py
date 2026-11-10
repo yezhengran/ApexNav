@@ -98,6 +98,15 @@ class BatchTest(unittest.TestCase):
             self.assertEqual('active_view.linked_evidence=true' in command, profile in ('linked', 'linked_stop', 'linked_stop_preserve'))
             self.assertEqual('active_view.stop_review=true' in command, profile in ('linked_stop', 'linked_stop_preserve'))
 
+    def test_qwen_backend_is_explicit_and_does_not_replace_baseline_itm(self):
+        command = evaluation_command('hm3dv2', 50, Path('/tmp/new-qwen'), True,
+                                     method='selected_review', review_profile='linked_stop_preserve',
+                                     review_backend='qwen', qwen_budget_ledger='/tmp/budget.json')
+        self.assertIn('active_view.backend=qwen', command)
+        self.assertIn('active_view.qwen_budget_ledger=/tmp/budget.json', command)
+        baseline = evaluation_command('hm3dv2', 50, Path('/tmp/baseline'), True)
+        self.assertFalse(any('qwen' in item or 'active_view' in item for item in baseline))
+
     def test_stop_decision_ablation_keeps_observations_identical(self):
         commands = [evaluation_command('hm3dv2', 10, Path('/tmp/a'), True,
                                       method='selected_review', review_profile=profile,

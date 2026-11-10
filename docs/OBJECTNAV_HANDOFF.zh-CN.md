@@ -1,221 +1,27 @@
-# ObjectNav：仿真开发到 Tracer Mini 的新窗口交接
+# ObjectNav 新窗口交接
 
-更新日期：2026-11-10。先读根目录 [AGENTS.md](../AGENTS.md)，再按本文继续。
+更新：2026-11-11。先读 AGENTS.md、docker/experiment_commands.zh-CN.md；最新用户指令优先于旧默认分支与提交频率。
 
-## 最新状态：STOP 决策 25 回合结束；Qwen API 与观测改进待配置/对齐
+## 当前状态：50+50 已结束，等待下一方法对齐
 
-2026-11-10 用户确认的独立 STOP 决策修正已完成：五例诊断加新 baseline/候选各前十，共 25 回合、七目录 completed/0；**baseline 10/10、linked_stop_preserve 9/10，SPL 64.42%/57.60%，未达不低于基线，不扩 100。** 实际新增复核共 20 次，均不确定；门槛第三例 PENDING、零 VLM 调用后在错误任务位置停止。详细失败与机制见 [本轮最终报告](experiments/2026-11-10-stop-decision-results.zh-CN.md)。评测/规划器退出，原四模型停止；一次性脚本完整归档验证后清理，勿重复启动。
+用户确认的新原 ApexNav 50＋Qwen 额外复核 50 已完成，均 completed/0。独立核验 100 视频完整解码、固定身份顺序、源码/41二进制/4权重不变、49次API图像来源与账本。调度器、评测和规划器退出，四模型已停；不要重复启动或自动扩展。
 
-工作分支 `codex/objectnav-review-evidence-fix`，运行基底 `341990bb4ae92581b3872827ad43342d8304bcb5`，未提交运行快照 `1777ebfecc960dce972c089a2c965ffc3456a3287d5535eb28f703167f8a3bf2`；158 源文件、39 二进制冻结。原分支保留 e25740f。整轮后统一提交代码/最终报告，不把事后提交冒充运行 provenance。
+结果与证据见 [最终报告](experiments/2026-11-10-qwen-paired50.zh-CN.md)：baseline 38/50、SR76%、SPL41.7953%、SoftSPL44.9111%；Qwen42/50、SR84%、SPL46.4892%、SoftSPL47.6022%。6恢复、2损失；49对首次复核前有动作差异，不能把全部增量归因Qwen。
 
-**最新用户要求：先分析基线失败与观测方法；新增复核改用 Qwen，不用图文匹配模型。** 用户先要求本地 Qwen，随后明确暂停下载、改用 API 并删除本地 Qwen。已停止下载进程，删除本次约 1.52 GB 未完成权重/续传文件及约 0.36 GB 专用环境；基线 PyTorch/transformers/accelerate 版本核验不变。删除记录在 `experiment_notes/validation/20261110-local-qwen/download-status.json`，不得重新下载或启动本地 Qwen。
+44次请求全部STOP触发，40候选有证据，49次调用26确认/23不确定/0否定，242观测动作。正式API估算0.040046元，含检查和失败预留账本0.061730元（20元上限），不可重置账本。模型别名qwen3-vl-plus无法保证服务端权重固定。
 
-API 方向沿用用户此前选定的百炼 Qwen3-VL-Plus，费用上限 20 元；尚无 API 调用，当前本地未配置 DASHSCOPE_API_KEY/BASE_URL，不在聊天收密钥。先用固定图像作离线对照，更换模型、输入上下文和调整阈值分别验证；新增复核不用 BLIP2，但原 ApexNav 探索 ITM 暂保留。尚未将 Qwen 接入在线导航。
+Qwen8失败：2超时、1受阻均未触发复核；1盆栽STOP缺证据无调用；4TV均两次不确定后按原规则停止。离线像素核验发现这些TV输入主要为真实wall tv_231，而任务只认可monitor_353/354。不得把它当非电视负样本、手改成绩或向在线输入真值。23个不确定中21个模型自报证据不足，裁图/视角值得改进；不等于已经验证模型准确率。
 
-[失败再分析与具体观测建议](experiments/2026-11-10-observation-failure-review.zh-CN.md)已写出：原 100 是 selected_review 75/100，**不是纯 baseline100**；25 失败为超时12、错误任务位置STOP8、受阻/无前沿3、高度筛查2。新增复核只覆盖失败72/99且均零调用，不能将这些失败统称 VLM 误判。纯 baseline100 缺失。正在向用户对齐是否先补同固定 baseline100，以及以图像可见性/截断/遮挡选择局部短程观测（拟上限8动作、受阻早退），尚未应用新观测运动或扩大评测。先查看最新用户回复再继续。
+建议待对齐：先用同批保存图像离线比较小crop与全图标框＋细节crop，再独立验证有界主动取景与更有信息的第二视图。保持原触发、探索、候选选择、STOP规则、模型及官方评测不变；具体动作预算与验证范围先询问用户，不自动运行下一轮。
 
-以下为历史状态，不覆盖上方当前指令。
+## 分支、来源与保存
 
-## 历史：A/B 整轮 45 回合完成，B 未过门槛，等待对齐
+当前修复分支 `codex/objectnav-review-evidence-fix`。运行基底 `9d4b14e58c52421c3e3983edf7fd30cced6f165c`；本轮实际未提交运行快照指纹 `99f2fb75f4e38b9bdbd26f8656e6bad437099ee15b1ce20914068170af5c4b82`（160运行文件）。事后提交不改写运行provenance。原分支 `codex/objectnav-sim-to-tracer-mini` 保留 `e25740f`。用户要求整轮结束统一commit/push origin同名修复分支、核对SHA，不提交阶段进度。
 
-2026-11-10 用户确认的“先 A，再独立 B”已完整结束：五例旧 evidence/A/B 各一次，新 baseline/A/B 各固定前十，共 45 回合、18 个目录，均 `completed / 0`。**baseline 9/10、A 10/10、B 7/10；SPL 分别 56.77%/61.82%/21.63%。A 门槛零额外复核，不能宣称 VLM 收益；B 未过门槛，不扩展 100。** 评测/规划器退出、四模型 DOWN。完整结果见 [A/B 最终报告](experiments/2026-11-10-linked-review-results.zh-CN.md)。
+两组固定同前50、seed100、500步、视频。baseline额外复核关闭，原BLIP2 ITM感知保留；Qwen为selected_review/linked_stop_preserve，只替换额外复核模型，未改观测运动。.65/.20不用于Qwen文字三段判定；每候选≤2调用，STOP来源≤2真实步。不采用.75触发线，不启实机，不输入在线真值。
 
-工作分支 `codex/objectnav-review-evidence-fix`，运行基底 `5da03cfeea265ba935a082c062644a9f76665c97`；原分支保持 `e25740f`。本轮按用户要求整轮结束才统一提交，没有阶段进度提交。运行源码为未提交快照 `4703a7f8bd60e4e7bad8e07b5394378ef375168ff81ce3cd43708235aea542a9`，158 文件/39 构建产物冻结；原 provenance 不改写成事后提交。
+原始输出保留于 `outputs/runs/qwen-paired50-20261110-{baseline,qwen}/`。本地协议、清单、账本、检查点、最终结果于 `experiment_notes/qwen-paired50-20261110/`，独立分析于其 `final-analysis/`。调度/一次性分析脚本归档后清理，不能恢复入口直接重跑或覆盖输出。
 
-A 的地图簇→原 mask 来源链已核验，五例三个候选五次调用均不确定，图像多为 55–179 步前局部/侧视。B 共 18 次调用，17 次不确定、一次确认；十次 STOP 请求只有八次实际调用（13 次当前视图调用），另外两次缺当前证据，其中一次也已耗尽预算。不能用地图 ID、触发数或导航 SR 代替 VLM 准确率。
+用户已要求清理此前实验：93个精确路径约8.75GB及十份旧报告已删除；旧数据/视频/日志不恢复、不混算，Git历史不重写。本地Qwen权重和专用环境已删除，不下载。新证据正常保留。
 
-关键失败证据：B 门槛第 6 例原 STOP 时离线视频距离约 0.04 m，当前马桶局部图得分 0.5285、不确定且无安全观测路径，候选暂缓后继续探索，最终在 2.7435 m 处停止失败。近距离 mask 贴边易被判证据不足，不确定被转为 400 步/无前沿暂缓，导致错失停止机会；第 4/5 例失败零复核，不能一并归因 VLM。
-
-**下一方案待用户对齐：保留 A 来源链，仅调整原高置信 STOP 的决策规则，缺证据/不确定保留原停止机会，可靠明确反证才撤销当前候选；原低置信 400 步规则、探索、高度、模型继续保留。** 先同观测离线回放，再经确认做五例加新 baseline/候选各十回合。图像质量/阈值校准另作独立变量。不自动应用、不重跑、不扩大 100、不删除分支。最终问题发出后暂停 `objectnav-100` 等待回复。
-
-本地依据 `experiment_notes/validation/20261110-linked-review/` 中 protocol、A/B-results、AB-independent-final-validation、AB-mechanism-final-analysis、final-archive-validation；原始输出 `outputs/runs/linked-review-20261110-r2-*/`。45 视频完整解码、来源/身份/指标/二进制核验通过；23 张实际 A/B 输入均可从 RGB/mask 精确重建。旧初次 g067 因回执晚于 episode_end 被排除，修复边界后的短测也不计成绩。一次性调度/分析脚本归档后清理，勿按历史心跳重新启动。
-
-以下均为历史状态，当时的启动、等待确认与方法建议不覆盖上方最新状态。
-
-## 历史：A1/A2 整轮完成，未通过门槛，等待下一步对齐
-
-**2026-11-09 用户已确认的复核证据链修复整轮完成：15 次完整单回合诊断，加新 baseline/A1 各 10 回合，共 35 回合。** 新 baseline 为 9/10，A1 为 8/10，SPL 分别 62.71%/50.96%，未通过“不低于新基线”的门槛；A1 门槛组额外复核为零。17 个运行目录均 `completed / 0`，全部视频完整解码、身份/顺序/指标/源码核验通过，评测与规划器已退出，四模型已停止。**不扩展到 100，不自动重跑；等待用户对齐下一方法。**
-
-工作分支为 **`codex/objectnav-review-evidence-fix`**，原 `codex/objectnav-sim-to-tracer-mini` 保留 `e25740f`。用户覆盖旧频繁提交规则：本轮不提交阶段进度，整轮结束后统一提交代码、最终报告并 push 新分支。运行基底 `e25740f`，实际源码为未提交快照，指纹 `79bc5a8953a822afa0c090a2ec3ad4b8423eba377e243b779d16533019aac61d`；各运行 provenance 保留该事实，不改写为事后提交。完整结果、范围、验证与归档见 [A1/A2 最终报告](experiments/2026-11-09-review-evidence-results.zh-CN.md)。
-
-诊断为全局 58/67/72/76/99，每例旧复核/A1/A2 各一次。成功数分别 2/5、1/5、0/5，复核候选 4/3/2，VLM 调用 0/2/0。A1 仅覆盖第 58 例的一个候选，两次均不确定；第 67 例持续有检测但空间不匹配。所有诊断配对在首次复核前已出现动作分歧，不能简单归因方法收益或损失。A1 按预设候选间规则进入门槛，并不意味着优于旧方案。
-
-建议下一轮先做“所选地图簇→来源 mask”的关联记录和同观测离线对照，确认归属后再改匹配；原探索、目标选择、低置信触发、0.65/0.20、400 步和高度筛查继续保留。此项尚待用户确认；不自动采用独立 0.75 线或扩大触发，不把真值输入在线导航。整轮结果与具体问题发出后暂停 `objectnav-100` 等待回复。
-
-本地依据为 `experiment_notes/validation/20261109-review-evidence/` 中的 protocol、diagnostic-final-analysis、gate-final-comparison、gate-independent-final-validation。原始输出在 `outputs/runs/review-fix-20261109-*/`。两个一次性 runner 已在完整归档后删除，禁止照旧心跳提示重新启动它们。少量可复用回归保留；原始结果和旧 100 归档均保留。
-
-以下为历史实验过程，当时的等待确认、启动或暂停指令不覆盖上方最新状态。
-
-## 历史：正式 100 回合完成与第一次方案对齐
-
-**2026-11-09 19:25（北京时间）核验正式目录为 `completed / 0`，固定 100 回合成功 75 次，SR=75.00%、SPL=41.49%、Soft SPL=43.50%。** 100 个唯一回合与固定顺序一致，暂停前 66 行及原配置/provenance 未变；全部 100 个视频完整解码，最终指标重算通过。评测/规划器已退出，四个本次模型服务已停止，可用 RAM 恢复约 10 GiB。原始目录保留，323 个文件完整归档并逐项校验，归档路径和 SHA 见 [最终报告与失败分析](experiments/2026-11-06-hundred-episode-failure-analysis.zh-CN.md)。这是中断后经续跑工具修复恢复的固定 100 评测，不能称为全程同源码、未中断运行。
-
-额外复核仅触发 5 次，全部不确定；118 个观测动作，实际 VLM 调用 1 次，因此不能可靠估计 VLM 准确率或证明收益。25 次失败已逐例保存视频抽帧和规划器证据；五个墙挂 TV 停止失败存在任务目标覆盖差异。第 85/97 回合被原高度筛查在 0 步结束，但正式配置的离线 Habitat reset/navmesh 审计确认路径存在，距离与正式指标一致，不能解释为真实不可达。
-
-**待对齐方案：优先只修复已选低置信目标的观测证据链，保留短时同簇图像、途中有合格证据即复核、结束前使用可用证据，并单独验证先原地对准和停滞早退出。原探索、目标选择、触发线、0.65/0.20 及 400 步规则保留。** 高度筛查修复和停止前扩大复核范围均为独立待确认选项，不自动纳入。方案问题发出后暂停 `objectnav-100`，等待用户回复；回复前不创建修复分支、不修改算法、不启动新评测。原分支保留；确认后在新 `codex/` 分支实现、验证、同集复测并推送。详见报告的验证门槛和收益限制。
-
-### 恢复经过（历史）
-
-**2026-11-09 用户明确要求“继续实验”，撤销此前暂停。16:23（北京时间）已从第 67 回合开头恢复，前 66 回合保留。** 续跑启动提交 `b6f6e6f`；Docker detached exec 日志为 `outputs/runtime/review-100-r2-resume-20261109-launcher.log`。已确认第 67 回合 tv 正常推进，只有一份批量评测和规划器；自动跟进 `objectnav-100` 已恢复 `ACTIVE`（20 分钟），仅在检查点、完成、异常或需用户决策时更新。`status.json` 在退出前可能仍显示旧 `interrupted / 130`，需结合实际进程判断，禁止重复启动。
-
-恢复前已核验暂停时 217 个原始文件及归档完全未变；续跑工具修复 `5444057` 已推送，9 项回归、真实 Habitat 9 次重置、3 步诊断中断后续跑、非零单回合入口均通过。正式配置逐字一致，算法、模型、参数未变。恢复起点和版本记录已备份到本次 validation 目录的 `resume-start-validation-20261109.json` / `resume-provenance/`；`paused-prefix-0066.csv` 单独保留供后续检查前 66 行，不能被新检查点备份覆盖。详见 [恢复工具验证](experiments/2026-11-09-resume-tooling.zh-CN.md)。
-
-恢复段源码指纹为 `baeceb2fb97f512c3608068ce081bcc7631b6eba61c8ebf71656c2dd26dd859f`。使用 `--resume --resume-migration habitat-initial-reset-v1`，只允许原/当前精确指纹对；原 provenance 不改写，`resume-provenance/attempt-*.json` 记录恢复提交、起点与文件校验。旧的“不使用 --resume”约束已由验证后的工具修复替代；剩余 34 回合继续冻结算法/配置，结束后才分析并向用户对齐方法修复。
-
-2026-11-09 18:45 跟进：90 回合检查点为 **67/90 成功（74.44%）、SPL=40.27%、Soft SPL=42.66%**，第 91 回合运行中。前 66 行、原配置/provenance 均保持不变，固定顺序与检查点指标校验通过，第 84–90 回合视频全部完整解码并备份结果。累计复核目标/观测 4 次、不确定 4 次、观测动作 118 个，实际 VLM 调用仍只有第 58 回合的 1 次。新增第 84/90 回合超时，以及第 85 回合在 0 步被原同楼层筛查判为 `infeasible` 的证据已保存；该回合仍计入分母，不直接把此标签视为真实不可达证明。详见 100 回合报告。继续冻结评测，满 100 后再对齐改进。
-
-### 2026-11-06 暂停记录（历史）
-
-**2026-11-06 用户明确要求暂时中断，之后从已有进度继续。已安全中断为 `interrupted / 130`，保留 66 个完整回合，成功 51 次（SR=77.27%、SPL=42.32%、Soft SPL=44.71%）。评测与规划器已退出，四个本次模型服务已停止，容器保留；自动跟进 `objectnav-100` 已设为 `PAUSED`。在用户明确要求继续前，不启动评测、模型或恢复自动跟进。**
-
-正式目录仍为 `outputs/runs/review-400-065-020-100-r2/`，启动 SHA `adcff3b3eb7c914df7f65211ccc7da8dbfe292d2`，源码指纹 `b7912d500a2d352c4583d81a1406d2c1faf4ac752fd050ff4cbd4a1da5415de9` 未变。66 行结果连续且唯一，已重算指标、核验固定清单顺序，66 个完整视频全部解码通过。完整运行目录及未完成第 67 回合证据已归档为 `experiment_notes/validation/20261106-hundred/review-400-065-020-100-r2-paused-0066.tar.gz`，217 个文件逐项校验通过；暂停/校验记录在同级 `review-400-065-020-100-r2/` 备份目录。原始输出、清单与 provenance 均保留。第 58 回合首次触发额外复核：1 次 VLM 调用，判定不确定，17 个观测动作；不能据此报告 VLM 准确率或因果收益。
-
-暂停时恢复入口尚有已知缺陷，当时禁止直接执行 `--resume`。2026-11-09 已按上方记录独立修复并验证。恢复从全局第 67 回合开头开始（scene `6s7QHgap2fW` / episode ID `10` / tv）；前 66 回合保留，未完成回合不支持从原步数恢复。原始归档和 provenance 保留，不手改清单绕过保护。
-
-原任务仍为：当前方案固定 100 回合完成后分析失败、先提问对齐修复，再建立新分支并同集复测。首批 `review-400-065-020-100` 的 5 回合仅作诊断（续跑被顺序保护拒绝，`failed / 1`），不拼入正式成绩。r2 原采用 Docker detached exec，启动日志 `outputs/runtime/review-100-r2-launcher.log`；自动跟进原实际间隔为 20 分钟，现已暂停。详见 [100 回合记录](experiments/2026-11-06-hundred-episode-failure-analysis.zh-CN.md)。原实验分支保留，算法改动仍需用户对齐。
-
-## 本轮续作状态：自适应观测实验
-
-**用户最新范围修正（2026-11-05）：** 只保留类似 DynZSON 的观测/重新验证环节，不改变 ApexNav 的探索策略、探索方式；方法改动前先向用户提问对齐。原型的目标点云前置过滤、禁用兜底选择超出此范围，不能继续视为用户认可的方法。对齐后已确认：仅当原规划器选中融合置信度未达原阈值的目标时复核；高置信度目标照旧；不确定候选保留，后期或无可用前沿时再进入原靠近/STOP 流程。用户授权分别测试 350/400 步及在 10 回合上调整三段阈值、选取效果较好的配置。新范围见 [重新验证方案](experiments/2026-11-05-selected-target-review-plan.zh-CN.md)。这不是仅在 STOP 时一律复核的旧提议。
-
-**扩展评测门槛已由用户确认：新方法先完成同集 10 回合，至少成功 8/10，且成功数不低于基线，才扩到 50 回合。** `av-debug-10` 旧原型在 9 回合仅成功 2 次，已正常中断并保留结果；同集 `baseline` 10 回合已完成 8/10 成功、SPL=50.15%；新方案已实现并完成两组 50 回合对照（见下方），不启动旧原型 50 回合。
-
-用户已选定迁移 [DynZSON](https://github.com/yezhengran/DynZSON) 的尺寸自适应观测并用 VLM 确认，授权方案完成后做固定 50 episode 对照；不再需要询问是否选择此方向。详细假设、实现边界、离线验证、旧结果和命令见 [首轮实验记录](experiments/2026-11-05-adaptive-view-plan.zh-CN.md)。
-
-- 当前入口为默认 `baseline` / 可选 `selected_review`；已移除旧原型的前置点云过滤和全局兜底禁用。只复核原规划器选中的低置信度簇，三段结果保留不确定，350/400 步门槛可配置。复用 BLIP2，入口为 `vlm/active_view.py` 与 C++ FSM / `active_view.h`。历史旧原型结果保留。
-- 保存逐回合指标、每 10 回合检查点、验证 crop/分数/位姿和实际 episode 清单；`docker/compare_runs.py` 检查同集同配置源码的共同前缀。新批次源码需提交，旧无 provenance 的目录不可用新启动器续跑，以免混入新版本。
-- 新范围通过 10 项状态机测试、2,000 组与 `3828f38` 的默认对象候选比较、C++ 状态/路径检查、真实六包构建、批量/视频 8 项及 Habitat 动作 2 项。临时测试脚本已删除，验证日志保留在 `experiment_notes/validation/20261105-adaptive-view/`。
-- 350/400 步开发组均 9/10，达到同集基线 9/10，按用户门槛已完成 baseline/400 步方法各 50 回合：**均为 42/50 成功（84%）；SPL 分别 42.79% / 47.41%。** 两组运行源码指纹一致，完整配对通过，3 次成功变失败、3 次失败变成功。覆盖两个场景并包含开发集，不能代表完整 val 或未见测试集。详见 [完整实验结果](experiments/2026-11-05-selected-target-review-results.zh-CN.md)。
-- **新方法全程额外复核/观测为 0，方法有效性和 VLM 判定准确率尚未验证。** 不将 SPL 波动归因于复核收益。用户于 2026-11-06 明确选择“保持当前方案，继续到 50 回合”，本轮不采用独立 0.75 复核触发线。既定两组 50 回合已完成，该回复不表示追加一组重复评测；后续方法改动仍须先对齐。
-- 本轮两组均 `completed / 0`，目录为 `outputs/runs/review-baseline-50/` / `outputs/runs/review-400-065-020-50/`。100 个完整视频、每 10 回合检查点、逐回合指标及完整配对/失败/复核统计已保存，主机备份在上述 validation 目录。评测与规划器已退出，四个本次模型服务已停止，容器保留；当前没有评测运行。下一轮先完成交接核验，并与用户对齐方法改动。
-- C++ 构建前先停本次模型服务（确认没有评测），优先单进程构建；四模型与双进程编译并行曾使 RAM 余量降至约 67 MiB，停止模型后恢复，禁止重复此运行组合。
-- 用户已在主机完成 Docker 授权；本会话可在沙箱外访问现有容器。`55c11c6` 已完成真实 ROS2 六包构建（并发限制为 2）、容器内批量/视频 8 项、HTTP 协议 8 项、Habitat 动作 2 项回归；真实场景 `HABITAT_ROS_SMOKE_OK` 和四个模型的 HTTP 推理通过。
-- 完整旧原型 `adaptive_view` 单回合已成功：`av-smoke-1`、代码 `cbe50fe`，345 步、SPL=13.75%。后续 9/10 部分诊断 SR=22.22%、SPL=8.27%，存在真实床、马桶、沙发 crop 被拒绝的证据；该原型未通过门槛且范围不符。已验证启动 CPU 缓存回收；用户关闭其他应用后四模型可用，导航期间 available 约 2.3–2.8 GiB。详细记录见 [续作验证](experiments/2026-11-05-integration.zh-CN.md)。
-- 旧 27/50 的文本日志可读：25 成功、2 无前沿，SR=92.59%、SPL=51.26%（舍入），单场景 `4ok3usBNeis`。仅为历史部分结果，无运行 SHA，不能充当本轮正式基线。
-
-## 1. 用户意图
-
-用户希望以 ApexNav 为起点，实现自己的目标导航版本：先在仿真和数据集上进行可复现测试，再迁移到实机。当前首项方向为尺寸自适应观测与 VLM 确认；不要把离线原型或现有环境修复当作已经验证有效的新算法。
-
-- 当前任务是 ObjectNav：给定目标物体类别，探索环境、寻找目标并判断到达；点到点导航仅是后续控制验证的一部分。
-- 工作在用户自己的 [GitHub 仓库](https://github.com/yezhengran/ApexNav)，每个完成的逻辑改动经验证后提交并推送到专用分支。
-- 当前优先使用四个本地视觉模型；资源不足再通过已配置的 HTTP 接口外置部分模型。
-- 用户称目标底盘为 `tacer_mini`，已有分支使用 `tracer-mini`。本文暂用 **Tracer Mini**；实际型号、驱动和传感器仍需确认。
-- 用户需要简洁中文说明、可复制命令、可观看视频和可保存的实验结果。
-
-## 2. 从哪个分支开始
-
-2026-11-05 已 fetch 并核对用户远程仓库：
-
-| 原有分支 | 核对结果 | 用途 |
-| --- | --- | --- |
-| `dev/tracer-mini` | `1ec9d15`，与 `ros2-jazzy` 完全相同 | 本次派生起点 |
-| `ros2-jazzy` | ROS2 Jazzy 社区移植，含回合重置修复 | 保留上游环境参考 |
-| `main` | `049971b`，规划模块仍用 ROS1/catkin | 参考算法修复，不直接合并 |
-| `Lite-Apexnav` | `63c3ed4`，规划模块仍用 ROS1/catkin | 参考轻量化设计，另做对照 |
-| `gh_pages` | 项目展示页 | 不用于实验开发 |
-
-**原实验分支：`codex/objectnav-sim-to-tracer-mini`；当前复核消融分支见顶部最新状态。**
-
-基线链路：`origin/dev/tracer-mini@1ec9d15` → **`3828f38` 环境/评测基线** → 本文与后续方法改动。
-`3828f38` 保存了此前仅存在于本机的 Docker 工作流、Habitat/模型兼容补丁、远程接口、批量计数/续跑和视频记录功能；这是本机复现基线，不应宣称与原论文发行版完全等同。
-
-`main` 中的 `dd4a822`（A* 节点池）、`204121e`（语义 frontier 索引）和 `049971b`（frontier/object 更新）不在 Jazzy 分支提交历史中。后续先比较代码确认是否适用，再独立移植、测试和记录，避免把基础修复收益混进算法收益。
-
-## 3. 已有环境与当前证据
-
-| 项目 | 信息 |
-| --- | --- |
-| 主机工程 | `/home/yezhengran/My_projects/ApexNav` |
-| 容器 / 工程挂载 | `apexnav-jazzy-egl` / `/workspace/ApexNav` |
-| Python / ROS 工作区 | `/opt/apexnav_venv` / `/opt/apexnav_ws` |
-| 记录的运行环境 | 容器 Ubuntu 24.04、ROS2 Jazzy、Python 3.12、Habitat 0.3.3、Torch 2.10 / CUDA 12.8、EGL |
-| 依赖版本依据 | [setup_container.sh](../docker/setup_container.sh)；Sim 固定为 `acbe6f49`，Lab 为 `v0.3.3` |
-| 本机资源 | RTX 4060 Laptop 8 GiB，主机 RAM 约 16 GiB；2026-11-05 检查时无 Swap |
-| 当前数据 | HM3Dv2 val；本轮检查通过：1,000 episodes、36 scenes，任务所需几何/navmesh/语义/config 缺失数均为 0 |
-| 模型服务 | BLIP2 `12182`、YOLOv7 `12184`、MobileSAM `12183`、GroundingDINO `12181` |
-
-日常操作以 [实验速查](../docker/experiment_commands.zh-CN.md) 和 [容器说明](../docker/README.md) 为准。根 README 的通用安装步骤不是本机需要重新执行的清单。
-
-已解决的关键问题包括：Lab/Sim 的 `Agent.sensors` 与 `_sensors` 接口差异、PyTorch 2.10 的模型/扩展兼容、HM3D 不依赖 MP3D 标签文件、视频逐帧编码降低内存占用。
-
-旧结果在 `outputs/runs/hm3dv2-local-50/`：本轮读到 `status.json` 为 `interrupted / 130`，日志最后记录完成第 **27** 个回合。汇总 JSON 需要容器权限读取；**50 回合尚不能认定完成**，不要据此发布完整 50 回合成绩。
-
-最初因 Docker 权限受限，只完成数据完整性、离线回归与语法检查；用户处理权限后已补做构建、GPU/Habitat 冒烟、模型 HTTP 与视频回归，详见顶部续作状态。完整导航与正式成绩仍需以新批次文件为准。
-
-曾发生主机 RAM 耗尽导致桌面应用退出。显存足够也应检查 `free -h`；模型占显存不等于评测进程仍在运行。
-
-## 4. 新 agent 的第一轮工作
-
-1. 核对当前分支、远程、工作区和运行进程；保留已有结果，确认 Docker 是否可访问。不要重建环境或自动启动 50/1,000 回合。
-2. 阅读下方代码入口，梳理“观测 → 检测/匹配 → 语义地图 → frontier/目标选择 → 动作 → 成功判定”。
-3. 核对旧结果及基线可运行性，建立一组固定 episode 清单；不同方法使用同一清单。
-4. 延续上方已选定的自适应观测方案，先解锁容器构建与集成验证；不要重新询问算法方向。
-5. 每项改动继续用配置开关实现、验证、记录、提交、推送；避免同时替换模型、规划器和评测规则。正式对照冻结代码，在各组之间不得改源码。
-
-## 5. 四阶段路线
-
-| 阶段 | 要做的事 | 完成依据 |
-| --- | --- | --- |
-| A：基线 | 固定配置和 episodes，确认复现流程 | 可复跑的基线结果、视频、失败分类和代码 SHA |
-| B：自定义 ObjectNav | 实现一个明确假设，保留基线开关 | 同 episode 对照与消融，说明收益、代价和退化案例 |
-| C：连续控制仿真 | 把高层目标/路径与底盘控制分开，验证速度控制闭环 | 里程计反馈、限速、停止、碰撞及观测延迟测试通过 |
-| D：Tracer Mini | 接入实际传感器、定位/TF、底盘驱动和安全控制 | 先静态/离线，再低速短程，最后目标导航任务测试 |
-
-先用 1 回合检查链路，再用固定 10 回合调试、50 回合比较；方法稳定后评估更大且覆盖多场景的集合。前 50 回合是顺序子集，可能集中在少数场景，不能代表完整 val 成绩。
-
-### 评测约定
-
-- 记录代码 SHA、配置、seed、scene/episode ID、模型/权重版本、成功判定、步数上限和输出路径；保持基线与方法一致。
-- 报告 SR、SPL、Soft SPL、目标距离、步数、耗时、失败分类，并附代表性视频。新增碰撞率或推理延迟时先补充可靠采集，现有 CSV 不包含的指标不要杜撰。
-- 当前配置：最大 500 步、成功距离 0.2 m、前进 0.25 m、转角 30°、半径 0.18 m。它们是仿真参数，不是已确认的实机参数。
-- 不新增依赖目标真值位置、最短路或评测成功信号的在线决策；明确现有 GPS/Compass 等理想位姿假设。
-- 原始数据、日志和视频留在 `outputs/`；在 `docs/experiments/` 提交简短报告。不要把调参过的 val 子集描述为未见测试集。
-
-## 6. 代码入口
-
-| 功能 | 首先阅读 |
-| --- | --- |
-| 仿真评测与配置 | `habitat_evaluation.py`、`config/habitat_eval_hm3dv2.yaml` |
-| 启动/续跑/结果保存 | `docker/run_batch.py`、`basic_utils/record_episode/experiment.py` |
-| 视觉服务与目标处理 | `vlm/server_wrapper.py`、`vlm/utils/get_object_utils.py`、`vlm/utils/get_itm_message.py` |
-| Habitat → ROS | `habitat2ros/habitat_publisher.py` |
-| 探索与决策 | `src/planner/exploration_manager/src/exploration_fsm.cpp`、`exploration_manager.cpp` |
-| 语义/价值/frontier 地图 | `src/planner/plan_env/src/object_map2d.cpp`、`value_map2d.cpp`、`frontier_map2d.cpp` |
-| 连续速度仿真 | `habitat_vel_control.py`、`real_world_test_example/real_world_test_habitat.py` |
-| 轨迹与 MPC | `src/planner/exploration_manager/launch/exploration_traj.launch.py`、`src/planner/trajectory_manager/src/traj_server.cpp` |
-
-轨迹示例发布 `/cmd_vel`，Habitat 速度控制脚本订阅它。现有 `real_world_test_example` 仍是 Habitat 示例，不能据此声称已经支持 Tracer Mini；连续控制路径本轮未运行验证。
-
-实机前需确认：准确型号/驱动仓库与 ROS 版本、控制接口和运动学、轮廓尺寸、RGB-D/激光/IMU、相机内外参、深度单位、时间同步、`map→odom→base_link→camera` TF、定位来源、速度/加速度限制和急停。默认不假设底盘有可俯仰相机；Habitat 的 look-up/down 动作需要按实际传感器结构重新处理。
-
-仿真沿用专用 ROS domain（启动器默认 79）；接入实机时确认网络和话题隔离。用户尚未授权本交接任务驱动真实机器人。
-
-## 7. 验证与提交工作流
-
-提交规则以 [AGENTS.md](../AGENTS.md) 为准。用户已授权每个完成的逻辑修改自动提交并推送，按文件审阅和暂存，不要把所有工作区内容一并上传。
-
-容器可访问后，优先运行现有无模型推理回归：
-
-```bash
-docker exec apexnav-jazzy-egl /opt/apexnav_venv/bin/python docker/test_batch.py
-docker exec apexnav-jazzy-egl /opt/apexnav_venv/bin/python docker/test_remote_api.py
-```
-
-C++ 改动运行 `./docker/apexnav build`；涉及 Habitat 动作时再运行 `docker/test_habitat_actions.py`（会使用 GPU）。根据改动选择测试，不要把短步数诊断算入正式成绩。
-
-提交前检查 `git diff --cached --check`。依赖补丁的原始上下文空白会触发警告；确认只在 `.patch` 内后可用以下命令检查其他文件，并保留补丁原样：
-
-```bash
-git diff --cached --check -- . ':(exclude)docker/patches/*.patch'
-git push origin HEAD:refs/heads/codex/objectnav-sim-to-tracer-mini
-git ls-remote origin refs/heads/codex/objectnav-sim-to-tracer-mini
-```
-
-推送前核对当前分支、`origin` 地址以及本地/远程是否分叉；不强推，不改上游或默认分支。无法运行的测试和推送失败都应明确记录。
-
-本仓库已配置用户 GitHub 名称和隐私邮箱用于提交；新机器应读取自己的正确配置，不从聊天复制密码/令牌。
-
-## 8. 可直接发送给新窗口的提示词
-
-> 请在 `/home/yezhengran/My_projects/ApexNav` 继续我的 ObjectNav 实验。先读 `AGENTS.md` 和 `docs/OBJECTNAV_HANDOFF.zh-CN.md`，核对工作分支 `codex/objectnav-sim-to-tracer-mini`。我的目标是先基于当前 ROS2 Jazzy/Habitat 环境开发自己的目标导航方法，做固定数据集上的基线对照，再迁移到 Tracer Mini。先检查现状、梳理决策链路并给出第一项可检验改进方案。每个完成且经适当验证的逻辑改动都提交并推送到我的 `origin` 同名分支，保留环境基线、原始结果和测试记录。按交接文档区分已验证内容与待核验事项。
+百炼北京地址 `https://dashscope.aliyuncs.com/compatible-mode/v1`。密钥仅在忽略的config/vlm.env，绝不显示、提交或写进快照。API异常/预算不足停止，不静默降级。正式100和失败分析完成后暂停自动跟进等待用户回复。

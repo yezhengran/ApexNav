@@ -45,36 +45,11 @@ docker exec apexnav-jazzy-egl pgrep -af '^python( -u)? docker/run_batch\.py( |$)
 ./docker/apexnav run-batch hm3dv2 --episodes 50 --video
 ```
 
-**续跑原实验（历史示例）**：2026-11-09 已修复首次 reset 的回合定位错误，并通过真实中断/续跑与非零单回合验证。下面的 r2 已完成 100 回合，不需要再次启动；仅供查看当时恢复参数。新实验/继续工作先看 [交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)，不要对已完成目录重复启动。
+**当前 50+50 对照已完成**，不要重复启动；最终结果与后续授权状态以[交接](../docs/OBJECTNAV_HANDOFF.zh-CN.md)和[本轮协议](../docs/experiments/2026-11-10-qwen-paired50.zh-CN.md)为准。旧实验数据和报告已清理，不使用旧目录续跑。
 
-```bash
-./docker/apexnav run-batch hm3dv2 --episodes 100 --video \
-  --method selected_review --uncertain-after-steps 400 \
-  --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 \
-  --output outputs/runs/review-400-065-020-100-r2 \
-  --resume --resume-migration habitat-initial-reset-v1
-```
+第一组 baseline；第二组 `selected_review / linked_stop_preserve --review-backend qwen`，需要事先初始化共享费用账本，不能直接复制单行命令绕过预算。两组 seed=100、500 步、相同前 50 回合。使用 `--snapshot-source` 归档本轮未提交源码，整轮结束再统一提交。
 
-续跑须保持原数据集、回合数和视频等设置；更换模型或参数请新建实验。相同源码的普通续跑仅需 `--resume`；上面的迁移名只允许登记的精确旧/新源码指纹对，保留原 provenance，并在 `resume-provenance/` 新增恢复段记录。它不允许任意源码变化，不能手改清单或指纹绕过保护。详见 [工具修复验证](../docs/experiments/2026-11-09-resume-tooling.zh-CN.md)。
-
-2026-11-05 起，新批次还记录 method、seed、源码指纹及实际 episode 顺序。默认要求工作区已提交；若已约定“整轮测试后提交”，可显式加 `--snapshot-source`，在输出目录保存精确源码快照并记录 `uncommitted` 状态，结束再次检查源码指纹。运行中仍不得改代码或配置，快照不会放宽续跑一致性检查。旧 `hm3dv2-local-50` 没有 provenance，保留结果，使用新目录重跑，不用新启动器混合续跑。
-
-2026-11-09 复核消融新增 `--review-profile legacy|evidence|evidence_turn`：默认 legacy 保留原行为，evidence 为近期证据缓存/途中复核，evidence_turn 另加原地对准/受阻早退出；后两者仅用于 `--method selected_review`。`--episode-index N` 是零基数据集索引，只允许新目录、`--episodes 1`，标记为独立诊断，不允许与 `--resume` 同用。这轮已完整结束且未通过扩展门槛，下一轮先对齐方法，参见 [最终报告](../docs/experiments/2026-11-09-review-evidence-results.zh-CN.md)。
-
-2026-11-10 增加独立配置 `linked`（A，地图来源关联）与 `linked_stop`（B，停止前缺证据/冲突复核），均默认关闭；ROS 消息变化需要重新构建。本轮 45 回合已经结束：baseline/A/B 门槛为 9/10、10/10、7/10。A 门槛零额外复核，B 未过门槛，当前不重跑或扩展。结果与待对齐的下一方案见 [A/B 最终报告](../docs/experiments/2026-11-10-linked-review-results.zh-CN.md)。
-
-2026-11-10 增加 `linked_stop_preserve`，仅修正原高置信 STOP 不确定/缺证据后的资格保留，实际停止仍经过原到达检查。该轮 25 回合已结束，baseline10/10、候选9/10，未过门槛；不要对原目录重跑。详见 [STOP 决策最终报告](../docs/experiments/2026-11-10-stop-decision-results.zh-CN.md)。用户最新要求使用 Qwen API 复核并优先分析观测（本地 Qwen 下载已停止并删除）；新的长实验安排以交接与用户回复为准。
-
-仅对原规划器选中目标复核的新方案，先跑同集 10 回合开发集；**至少 8/10 成功且不低于基线后才能扩到 50**。350/400 步分别使用独立目录，阈值修改也使用新目录（详见 [新方案](../docs/experiments/2026-11-05-selected-target-review-plan.zh-CN.md)）：
-
-```bash
-./docker/apexnav run-batch hm3dv2 --episodes 10 --method baseline --seed 100 --video --output outputs/runs/review-baseline-10
-./docker/apexnav run-batch hm3dv2 --episodes 10 --method selected_review --uncertain-after-steps 350 --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 --video --output outputs/runs/review-350-065-020-10
-./docker/apexnav run-batch hm3dv2 --episodes 10 --method selected_review --uncertain-after-steps 400 --confirm-threshold 0.65 --reject-threshold 0.20 --seed 100 --video --output outputs/runs/review-400-065-020-10
-python3 docker/compare_runs.py outputs/runs/review-baseline-10 outputs/runs/review-350-065-020-10
-```
-
-逐条顺序运行，不同时运行多份。每回合保存 summary/CSV，每 10 回合另存 checkpoint。旧 `vlm/fixed_view/adaptive_view` 属于范围过大的失败原型，已移除运行入口，历史记录与对应 Git 提交保留。新范围的额外观测保持一次有界尝试；当前还没有确认最佳阈值。50 回合包含开发集，不能称作未见测试集。
+普通中断恢复使用同目录 `--resume` 并保持源码/配置一致；预算账本不得重置。修改模型或参数须另开实验，不手改来源记录。
 
 C++ 构建前确认评测已停止，再用 `./docker/apexnav vlm-stop-local` 停止本次模型服务；编译结束再启动模型。不要同时运行四模型与双进程 C++ 编译，以免挤满主机 RAM。
 

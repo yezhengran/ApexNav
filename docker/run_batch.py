@@ -41,7 +41,8 @@ def stop_owned(process):
 
 def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
-                       uncertain_after_steps=350, episode_index=-1, review_profile="legacy"):
+                       uncertain_after_steps=350, episode_index=-1, review_profile="legacy",
+                       review_backend="blip2", qwen_budget_ledger=""):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         f"test_epi_num={episode_index}", f"+max_episodes={episodes}",
@@ -61,6 +62,9 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
             prefix = '+' if dataset != 'hm3dv2' else ''
             command.extend([f"{prefix}active_view.linked_evidence=true",
                             f"{prefix}active_view.stop_review={str(review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}"])
+        if review_backend == 'qwen':
+            command.extend(['active_view.backend=qwen',
+                            f'active_view.qwen_budget_ledger={qwen_budget_ledger}'])
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     return command
@@ -160,6 +164,9 @@ def main():
     parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
+    parser.add_argument('--review-backend', choices=['blip2', 'qwen'], default='blip2')
+    parser.add_argument('--qwen-budget-ledger', default='',
+                        help='Shared initialized local JSON ledger; never contains credentials')
     parser.add_argument("--reject-threshold", type=float, default=0.20)
     parser.add_argument("--uncertain-after-steps", type=int, default=350)
     args = parser.parse_args()
@@ -179,6 +186,15 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
+    if args.review_backend == 'qwen':
+        if args.method != 'selected_review' or args.review_profile != 'linked_stop_preserve':
+            parser.error('This Qwen comparison requires selected_review / linked_stop_preserve')
+        ledger = (ROOT / args.qwen_budget_ledger).resolve()
+        if not args.qwen_budget_ledger or not ledger.is_file() or not ledger.is_relative_to(ROOT):
+            parser.error('Qwen requires an existing budget ledger within the checkout')
+        args.qwen_budget_ledger = str(ledger)
+    elif args.qwen_budget_ledger:
+        parser.error('--qwen-budget-ledger requires --review-backend qwen')
     if args.method != "baseline" and args.dataset != "hm3dv2":
         parser.error("Active-view experiments currently require hm3dv2")
     stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y%m%d-%H%M%S")
@@ -189,7 +205,8 @@ def main():
     command = evaluation_command(args.dataset, args.episodes, output, args.video, args.max_steps,
                                  args.method, args.seed, args.confirm_threshold,
                                  args.reject_threshold, args.uncertain_after_steps,
-                                 args.episode_index, args.review_profile)
+                                 args.episode_index, args.review_profile,
+                                 args.review_backend, args.qwen_budget_ledger)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -197,6 +214,12 @@ def main():
         spec["review"] = {"confirm_threshold": args.confirm_threshold,
                           "reject_threshold": args.reject_threshold,
                           "uncertain_after_steps": args.uncertain_after_steps}
+        if args.review_backend == 'qwen':
+            spec['review'] = {'backend': 'qwen', 'model': 'qwen3-vl-plus',
+                              'endpoint': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                              'decision': 'structured three-way; no ITM thresholds',
+                              'budget_ledger': args.qwen_budget_ledger,
+                              'uncertain_after_steps': args.uncertain_after_steps}
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
     if args.episode_index >= 0:
