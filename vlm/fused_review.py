@@ -146,13 +146,16 @@ class FusedTargetReviewer(LinkedTargetReviewer):
             return self._complete(decision, 'first_view_confirmed')
         self.inspected.add(ident)
         self.active = self.selected
-        self.active.update(radius=observation_radius(extent), started=self.step,
+        self.active.update(self._inspection_geometry(extent), started=self.step,
             last_motion=self.step, last_position=np.array(self.pose[:2]))
         self.stats['inspections'] += 1
         self.event('inspection_requested', candidate=ident, radius=self.active['radius'],
             center=[cx, cy], extent=extent, reason='no_reachable_confirmed_alternative',
             initial_decision=self.first_decisions[ident])
         return None
+
+    def _inspection_geometry(self, extent):
+        return {'radius': observation_radius(extent)}
 
     def _verify(self, phase, evidence=None):
         chosen = evidence if evidence is not None else self._evidence(unused=True)

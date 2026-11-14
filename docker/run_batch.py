@@ -61,14 +61,16 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_profile != "legacy":
             command.extend(["active_view.recent_evidence=true",
                             f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
-        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence"):
+        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing"):
             prefix = '+' if dataset != 'hm3dv2' else ''
             command.extend([f"{prefix}active_view.linked_evidence=true",
                             f"{prefix}active_view.stop_review={str(review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}"])
-        if review_profile in ('linked_fused', 'linked_confidence'):
+        if review_profile in ('linked_fused', 'linked_confidence', 'linked_framing'):
             command.append('+active_view.fused_review=true')
-        if review_profile == 'linked_confidence':
+        if review_profile in ('linked_confidence', 'linked_framing'):
             command.append('+active_view.confidence_review=true')
+        if review_profile == 'linked_framing':
+            command.append('+active_view.framing_review=true')
         if review_profile == 'linked_early':
             command.extend(['+active_view.early_review=true',
                             f'+active_view.early_review_threshold={early_review_threshold}'])
@@ -222,7 +224,7 @@ def main():
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence"],
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument('--early-review-threshold', type=float, default=None,
                         help='linked_early only: single-frame target detector score, default 0.65')
@@ -255,9 +257,9 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
-    if args.review_profile in ('linked_fused', 'linked_confidence') and not args.step_sync:
+    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') and not args.step_sync:
         parser.error('linked_fused requires --step-sync')
-    if args.review_profile == 'linked_confidence' and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
+    if args.review_profile in ('linked_confidence', 'linked_framing') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
         parser.error('linked_confidence requires Qwen and --uncertain-after-steps 400')
     if args.review_profile == 'linked_early':
         if not args.step_sync:
@@ -269,7 +271,7 @@ def main():
     elif args.early_review_threshold is not None:
         parser.error('--early-review-threshold requires linked_early')
     if args.review_backend == 'qwen':
-        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence'):
+        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing'):
             parser.error('Qwen requires selected_review / linked_stop_preserve, linked_early or linked_fused')
         ledger = (ROOT / args.qwen_budget_ledger).resolve()
         if not args.qwen_budget_ledger or not ledger.is_file() or not ledger.is_relative_to(ROOT):
@@ -316,15 +318,19 @@ def main():
                                 'ranking': 'target confidence, completeness, pixels, newest',
                                 'uncertain': 'wait for natural novel evidence; no inspection detour',
                                 'max_calls_per_candidate': 2}
-    if args.review_profile in ('linked_fused', 'linked_confidence'):
+    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing'):
         spec['fused_review'] = {'trigger': 'original map class threshold and observation eligibility',
             'image_selection': 'highest detector confidence per mapper ID',
             'additional_view': 'one safe viewpoint if first review not confirmed and no reachable confirmed alternative',
             'max_calls_per_candidate': 2}
-    if args.review_profile == 'linked_confidence':
+    if args.review_profile in ('linked_confidence', 'linked_framing'):
         spec['confidence_review'] = {'fusion_weight': .5, 'qwen_weight': .5, 'missing_qwen': 'fusion_only',
             'second_call': 'after_center_facing_observation', 'image': 'singleton_best_history',
             'qwen_score': 'latest_target_category_confidence_uncalibrated'}
+    if args.review_profile == 'linked_framing':
+        spec['framing_review'] = {'geometry': 'linked_best_mask_depth_3d_bounds',
+            'image_fraction': .8, 'surface_distance_min_m': 1.1,
+            'arrival_margin_m': .3125, 'max_radius_m': 4.5, 'pitch_actions': False}
     if args.step_sync:
         spec["navigation_step_sync"] = True
     if args.failure_videos:
@@ -425,13 +431,13 @@ def main():
                             ["ros2", "launch", "exploration_manager", "exploration.launch.py",
                              f"review_enabled:={str(args.method == 'selected_review').lower()}",
                              f"review_late_step:={args.uncertain_after_steps}",
-                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence')).lower()}",
+                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing')).lower()}",
                              f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
-                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence') else []),
-                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence') else []),
-                             *(['review_confidence:=true'] if args.review_profile == 'linked_confidence' else [])],
+                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing') else []),
+                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') else []),
+                             *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing') else [])],
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                         )
                     time.sleep(3)

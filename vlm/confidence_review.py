@@ -40,7 +40,7 @@ class ConfidenceTargetReviewer(FusedTargetReviewer):
             np.savez_compressed(path, rgb=packet['rgb'], depth=packet['depth'],
                 mask_bits=e['mask_bits'], mask_shape=e['mask_shape'], pose=e['pose'],
                 pitch=packet['pitch'], bounds=e['bounds'], observation=e['step'],
-                mask_index=e['key'][1], candidate=ident)
+                mask_index=e['key'][1], candidate=ident, **self._source_metadata(packet))
             e['source_file'] = str(path)
             # Historical thumbnails are audit/presentation artifacts. Only one
             # NPZ is live in the selection index for each candidate.
@@ -60,6 +60,9 @@ class ConfidenceTargetReviewer(FusedTargetReviewer):
             pixels=e['pixels'], short_side=e['short_side'], pose=e['pose'],
             complete=e['complete'], eligible=self._eligible(e), retained=retained,
             trigger='map_fusion_not_image_score', best_key=list(best['key']) if best else None)
+
+    def _source_metadata(self, packet):
+        return {}
 
     def _evidence(self, unused=False):
         self.evidence_filter_counts = {'selection': 'singleton_best_history'}

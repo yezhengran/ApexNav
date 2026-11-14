@@ -14,14 +14,15 @@
 | **Q3** | **单帧提前复查版（0.65）** | `linked_early`；单帧检测分数 ≥0.65 自动触发，发送同候选最佳可用 crop；不确定后自然行进取得新视角；关闭额外观测绕行和旧 STOP 复查 | `codex/objectnav-early-vlm-review` |
 | **Q4** | **融合提前复查＋主动观测版** | `linked_fused`；原类别融合阈值触发，发送与地图候选绑定的最高单帧分数可用 crop；首次未通过且无其他已确认、可达目标时，规划安全观测点、执行补拍动作并二次复查 | `codex/objectnav-fused-vlm-active-observation` |
 | **Q5** | **朝向后复查＋置信度加权版** | `linked_confidence`；沿用 Q4 融合触发和条件安全观测；二次调用等待到点朝向中心后的真实观测，仍用该对象全历史最高检测分数 crop；Qwen 返回类别置信度，400 步后未确认候选按 0.5 融合＋0.5 Qwen 排序，未调用者保持融合分数 | `codex/objectnav-facing-confidence-review` |
+| **Q6** | **高度视场观测版** | `linked_framing`；在 Q5 上用同候选最佳 mask/depth 的三维可见范围、当前相机高度与固定视场增加安全观测距离；保留最高分 crop 与全部复查/排序规则；无抬头低头 | `codex/objectnav-height-aware-viewpoint` |
 
-**用户当前要求的方法是 Q5，固定重跑 Q4 演示的第 10 和 885 两例；旧批次保持暂停。** Q3 的“单帧 0.65”和 Q4 的“原类别融合阈值”是两种不同触发机制。Q4 仍需要寻找观测点位；额外观测可能是转向、平移，也可能因无安全点位而未执行，须根据真实动作分别统计。
+**用户当前要求的方法是 Q6，固定重跑第 10 chair 和 885 tv 两例；旧批次保持暂停。** Q3 的“单帧 0.65”和 Q4 的“原类别融合阈值”是两种不同触发机制。Q4 仍需要寻找观测点位；额外观测可能是转向、平移，也可能因无安全点位而未执行，须根据真实动作分别统计。
 
 B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支没有其他可选实验功能。原生参考提交为 `3828f38`；历史 B0 数据实际使用各自来源记录中的源码，并显式关闭新增复查。不能仅用分支 HEAD 代替数据来源。
 
 ## 阈值与图片的约定
 
-| 类别 | 原类别融合阈值（Q4/Q5 沿用） |
+| 类别 | 原类别融合阈值（Q4/Q5/Q6 沿用） |
 | --- | ---: |
 | bed | 0.65 |
 | couch | 0.60 |
@@ -50,6 +51,7 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | `Q4-tvplant4` | Q4，预选 111盆栽、122电视、174盆栽、237电视 | 0/4 完成；内存不足停止。首尝试 111 未完成、后一次导航前预检停止；均无 Qwen 调用 | `outputs/runs/qwen-fused-tv-plant-demo-20261114/` 和 `outputs/runs/qwen-fused-tv-plant-demo-20261114-after-cleanup/` |
 | `Q4-demo2` | Q4，chair/tv/potted plant目的性小池 | 完成4例后停止；英文选例10 chair（1复核、0主动观测）与885 tv（5复核、6动作、4平移、导航成功但回答均不确定）；不推断总体SR | `outputs/runs/q4-two-demos-20261114-25g/`，观看版`presentation-en/`；见[记录](experiments/2026-11-14-q4-two-demos.zh-CN.md) |
 | `Q5-demo2` | Q5，固定重跑第 10 chair 与 885 tv | 2/2 成功，197/77 步；2/3 次复核，20/39 观测动作；均在 400 步前结束，加权排序仅离线验证 | `outputs/runs/qwen-facing-confidence-20261114/`；见[记录](experiments/2026-11-14-qwen-facing-confidence.zh-CN.md) |
+| `Q6-demo2` | Q6，固定第 10 chair 与 885 tv | 348/365 步均成功；chair 实际观测距离 3.06 米、16 动作，tv 未找到安全补拍点、1 动作、无二次复查；步数增加，不能称整体提升 | `outputs/runs/qwen-height-view-20261114-corrected/`；有效控制/审计 `experiment_notes/qwen-height-view-20261114/continue-tv/`；见[记录](experiments/2026-11-14-qwen-height-view.zh-CN.md) |
 
 `Q4-fail30` 是旧失败子集，`Q3-first30` 是顺序前 30，不能直接比较两者百分比。Q1 前 50 对照曾在首次复查前出现轨迹分歧；它不是固定轨迹下只替换 VLM 的因果消融。Q2-full1000 也不能与 B0-paired50 直接作全量公平对照。
 

@@ -16,6 +16,8 @@ public:
   int id = 0;
   Eigen::Vector2d center = Eigen::Vector2d::Zero();
   double radius = 0.0, extent = 0.0;
+  double minimum_radius = 0.0, max_radius = 0.0;
+  bool framing = false;
   bool locked = false;
   bool turn_first = false, oriented = false;
   int orientation_steps = 0;
@@ -26,22 +28,32 @@ public:
   bool set(const std::vector<double>& data)
   {
     if (data.empty()) { *this = ActiveView(); return true; }
-    if (data.size() != 5 && data.size() != 6) return false;
+    if (data.size() != 5 && data.size() != 6 && data.size() != 7) return false;
     for (double x : data) if (!std::isfinite(x)) return false;
     if (data[0] < 1 || data[0] > 1000000 || std::floor(data[0]) != data[0] ||
-        data[3] < 0.6 || data[3] > 3.5 || data[4] < 0.15 || data[4] > 3.0)
+        data[3] < 0.6 || data[3] > (data.size() == 7 ? 4.5 : 3.5) || data[4] < 0.15 || data[4] > 3.0)
       return false;
     if (data.size() == 6 && data[5] != 1.0) return false;
+    if (data.size() == 7 && (data[5] < .6 || data[5] > data[3] ||
+        data[6] < data[3] || data[6] > 4.5)) return false;
     if (id == static_cast<int>(data[0])) return true;  // Freeze this instance.
     id = static_cast<int>(data[0]);
     center = Eigen::Vector2d(data[1], data[2]);
     radius = data[3];
     extent = data[4];
+    framing = data.size() == 7;
+    minimum_radius = framing ? data[5] : 0.;
+    max_radius = framing ? data[6] : radius;
     locked = false;
     turn_first = data.size() == 6;
     oriented = false;
     orientation_steps = 0;
     return true;
+  }
+
+  bool framed(const Eigen::Vector2d& point) const
+  {
+    return !framing || (point - center).norm() + 1e-5 >= minimum_radius;
   }
 
   static bool safePath(const std::vector<Eigen::Vector2d>& path, const Safe& safe)
@@ -79,22 +91,26 @@ public:
     if (locked)
       return safe(goal) && visible(goal, clear) && route(goal, path) && safePath(path, safe);
 
-    struct Candidate { Eigen::Vector2d point; int free; double distance; };
+    struct Candidate { Eigen::Vector2d point; int ring, free; double distance; };
     std::vector<Candidate> candidates;
     constexpr double pi = 3.14159265358979323846;
-    for (int i = 0; i < 24; ++i) {
+    for (int ring = 0; ring < (framing ? 3 : 1); ++ring) {
+      const double search_radius = std::min(max_radius, radius + ring * .35);
+      if (ring && search_radius <= radius + (ring-1)*.35 + 1e-8) continue;
+      for (int i = 0; i < 24; ++i) {
       double angle = 2 * pi * i / 24;
-      Eigen::Vector2d point = center + radius * Eigen::Vector2d(std::cos(angle), std::sin(angle));
+      Eigen::Vector2d point = center + search_radius * Eigen::Vector2d(std::cos(angle), std::sin(angle));
       // Require translation beyond the 0.3125 m arrival tolerance.
       if ((point - start).norm() < 0.65 || !safe(point) || !visible(point, clear)) continue;
       int free = 0;
       for (int x = -5; x <= 5; ++x)
         for (int y = -5; y <= 5; ++y)
           if (x*x + y*y <= 25 && safe(point + Eigen::Vector2d(x*0.1, y*0.1))) ++free;
-      candidates.push_back({point, free, (point - start).norm()});
+      candidates.push_back({point, ring, free, (point - start).norm()});
+      }
     }
     std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-      return std::make_tuple(-a.free, a.distance) < std::make_tuple(-b.free, b.distance);
+      return std::make_tuple(a.ring, -a.free, a.distance) < std::make_tuple(b.ring, -b.free, b.distance);
     });
     for (const auto& candidate : candidates) {
       if (route(candidate.point, path) && safePath(path, safe)) {

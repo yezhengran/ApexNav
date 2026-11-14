@@ -772,9 +772,13 @@ int ExplorationFSM::planInspection()
   if (!was_locked)
     RCLCPP_INFO(node_->get_logger(), "[Active view] id=%d point=(%.3f, %.3f) radius=%.3f",
         active_view_.id, active_view_.goal.x(), active_view_.goal.y(), active_view_.radius);
+  if (!was_locked && active_view_.framing)
+    RCLCPP_INFO(node_->get_logger(), "[Framed view] id=%d minimum=%.6f selected_radius=%.6f",
+        active_view_.id, active_view_.minimum_radius,
+        (active_view_.goal - active_view_.center).norm());
   expl_manager_->ed_->next_pos_ = active_view_.goal;
   expl_manager_->ed_->next_best_path_ = path;
-  if ((position - active_view_.goal).norm() <= 0.3125) {
+  if ((position - active_view_.goal).norm() <= 0.3125 && active_view_.framed(position)) {
     if (!active_view_.visible(position, clear)) {
       fd_->newest_action_ = ACTION::INSPECTION_FAILED;
       return FINAL_RESULT::EXPLORE;
