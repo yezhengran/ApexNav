@@ -47,6 +47,7 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | **`Q3-first30`** | Q3，原清单前 30 | **29/30，96.67%**；Q2 同集合 28/30；Q3 没有额外绕行 | `outputs/runs/qwen-early30-20261114/` |
 | **`Q4-fail30`** | Q4，Q2-full1000 的失败按全局编号取前 30 | **暂停：完成 16/30，恢复成功 2/16**；不是完整集成功率 | `outputs/runs/qwen-fused-fail30-20261114-offline/`；有效记录在 `experiment_notes/qwen-fused-fail30-20261114/init-offline/` |
 | `Q4-tvplant4` | Q4，预选 111盆栽、122电视、174盆栽、237电视 | 0/4 完成；内存不足停止。首尝试 111 未完成、后一次导航前预检停止；均无 Qwen 调用 | `outputs/runs/qwen-fused-tv-plant-demo-20261114/` 和 `outputs/runs/qwen-fused-tv-plant-demo-20261114-after-cleanup/` |
+| `Q4-demo2` | Q4，chair/tv/potted plant目的性小池 | 完成4例后停止；英文选例10 chair（1复核、0主动观测）与885 tv（5复核、6动作、4平移、导航成功但回答均不确定）；不推断总体SR | `outputs/runs/q4-two-demos-20261114-25g/`，观看版`presentation-en/`；见[记录](experiments/2026-11-14-q4-two-demos.zh-CN.md) |
 
 `Q4-fail30` 是旧失败子集，`Q3-first30` 是顺序前 30，不能直接比较两者百分比。Q1 前 50 对照曾在首次复查前出现轨迹分歧；它不是固定轨迹下只替换 VLM 的因果消融。Q2-full1000 也不能与 B0-paired50 直接作全量公平对照。
 
