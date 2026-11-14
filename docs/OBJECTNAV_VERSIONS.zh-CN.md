@@ -16,7 +16,7 @@
 | **Q5** | **朝向后复查＋置信度加权版** | `linked_confidence`；沿用 Q4 融合触发和条件安全观测；二次调用等待到点朝向中心后的真实观测，仍用该对象全历史最高检测分数 crop；Qwen 返回类别置信度，400 步后未确认候选按 0.5 融合＋0.5 Qwen 排序，未调用者保持融合分数 | `codex/objectnav-facing-confidence-review` |
 | **Q6** | **高度视场观测版** | `linked_framing`；在 Q5 上用同候选最佳 mask/depth 的三维可见范围、当前相机高度与固定视场增加安全观测距离；保留最高分 crop 与全部复查/排序规则；无抬头低头 | `codex/objectnav-height-aware-viewpoint` |
 
-**用户当前要求的方法是 Q6，固定重跑第 10 chair 和 885 tv 两例；旧批次保持暂停。** Q3 的“单帧 0.65”和 Q4 的“原类别融合阈值”是两种不同触发机制。Q4 仍需要寻找观测点位；额外观测可能是转向、平移，也可能因无安全点位而未执行，须根据真实动作分别统计。
+**用户当前方法为 Q6；`Q6-first100` 已完成100/100、78成功，已停止，不自动扩展101–1000。** 两例演示与前100成绩分别保存，旧批次和全量失败归因保持暂停。 Q3 的“单帧 0.65”和 Q4 的“原类别融合阈值”是两种不同触发机制。Q4 仍需要寻找观测点位；额外观测可能是转向、平移，也可能因无安全点位而未执行，须根据真实动作分别统计。
 
 B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支没有其他可选实验功能。原生参考提交为 `3828f38`；历史 B0 数据实际使用各自来源记录中的源码，并显式关闭新增复查。不能仅用分支 HEAD 代替数据来源。
 
@@ -52,6 +52,7 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | `Q4-demo2` | Q4，chair/tv/potted plant目的性小池 | 完成4例后停止；英文选例10 chair（1复核、0主动观测）与885 tv（5复核、6动作、4平移、导航成功但回答均不确定）；不推断总体SR | `outputs/runs/q4-two-demos-20261114-25g/`，观看版`presentation-en/`；见[记录](experiments/2026-11-14-q4-two-demos.zh-CN.md) |
 | `Q5-demo2` | Q5，固定重跑第 10 chair 与 885 tv | 2/2 成功，197/77 步；2/3 次复核，20/39 观测动作；均在 400 步前结束，加权排序仅离线验证 | `outputs/runs/qwen-facing-confidence-20261114/`；见[记录](experiments/2026-11-14-qwen-facing-confidence.zh-CN.md) |
 | `Q6-demo2` | Q6，固定第 10 chair 与 885 tv | 348/365 步均成功；chair 实际观测距离 3.06 米、16 动作，tv 未找到安全补拍点、1 动作、无二次复查；步数增加，不能称整体提升 | `outputs/runs/qwen-height-view-20261114-corrected/`；有效控制/审计 `experiment_notes/qwen-height-view-20261114/continue-tv/`；见[记录](experiments/2026-11-14-qwen-height-view.zh-CN.md) |
+| **`Q6-first100`** | Q6，原固定清单前100、4场景 | **78/100，78.00%**；SPL33.3052%、SoftSPL33.8811%；Q2同集合78/100但SPL40.6128%；22失败视频，已停止 | `outputs/runs/qwen-height-first100-20261114/`；有效汇总/独立验收`experiment_notes/qwen-height-first100-20261114/continue-0086-20261114/`；见[记录](experiments/2026-11-14-qwen-height-first100.zh-CN.md) |
 
 `Q4-fail30` 是旧失败子集，`Q3-first30` 是顺序前 30，不能直接比较两者百分比。Q1 前 50 对照曾在首次复查前出现轨迹分歧；它不是固定轨迹下只替换 VLM 的因果消融。Q2-full1000 也不能与 B0-paired50 直接作全量公平对照。
 
@@ -67,6 +68,7 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | Q3 | `early-vlm-review` 本地分支仍在基底 `6829be9`；实现尚未提交、分支尚未发布 | 172 文件：`5b561ad7d77359bf01fe40915e2be24add842d61616b8e195949a635edb5ab7b` |
 | Q4 | `fused-vlm-active-observation` 的 `a7718ad` 为方案文档；本次登记也是文档改动，运行实现尚未提交 | 174 文件：`57c9b71c4a7424c648fbcbca93e677a7860b044e16a00d670ec3e0567e8651f2` |
 | Q5 | 本次新分支提交完整可选实现（包含此前 Q2–Q4 未提交的必要运行基础）；旧分支和旧 provenance 不改写 | 179 文件：`8b7c78660f4efd79162dfb858c0f4a219e972412c5dc14680bcee509e5b8948e`；独立 facing-confidence overlay |
+| Q6 | `height-aware-viewpoint` 已提交运行实现`d8cede2`；前100全过程源码保持 | 182文件：`773604203d61b5134c9a3717b1027530c514a09362bdd2e0aba83782fcf17338`；height-view overlay617文件（3个ATSP运行临时文件除外） |
 
 每组的 `provenance.json`、`source-snapshot/runtime-source.tar.gz`、`source-snapshot/files.json` 或 `resume-provenance/` 保存运行来源。复现还需该组 config、episode 清单、安装二进制／overlay 与模型权重指纹；单独 checkout 目前的 Q2/Q3/Q4 分支不等于恢复对应实验实现。后续完成各自归档时，应从精确快照提交并更新此表，不能把当前 Q4 工作区一起提交为 Q2 或 Q3。
 
