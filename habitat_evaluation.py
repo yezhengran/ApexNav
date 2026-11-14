@@ -351,7 +351,9 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             raise ValueError('Qwen verification requires explicit linked image evidence')
         from vlm.qwen_review import QwenReviewer
         review_verifier = QwenReviewer(view_cfg.qwen_budget_ledger, view_cfg.qwen_model,
-                                       target_confidence=getattr(view_cfg, "confidence_review", False))
+                                       target_confidence=getattr(view_cfg, "confidence_review", False),
+                                       plant_confirm_threshold=getattr(
+                                           view_cfg, "qwen_plant_confirm_threshold", None))
 
     llm_cfg = cfg.llm
     llm_client = llm_cfg.llm_client

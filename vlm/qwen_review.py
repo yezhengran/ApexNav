@@ -153,7 +153,14 @@ class QwenTransportError(RuntimeError):
 
 
 class QwenReviewer:
-    def __init__(self, ledger, model=MODEL, target_confidence=False):
+    def __init__(self, ledger, model=MODEL, target_confidence=False,
+                 plant_confirm_threshold=None):
+        if plant_confirm_threshold is not None:
+            if (not target_confidence or type(plant_confirm_threshold) not in (int, float) or
+                    not math.isfinite(plant_confirm_threshold) or
+                    not 0 <= plant_confirm_threshold <= 1):
+                raise ValueError('Plant confirmation threshold requires target confidence and [0, 1]')
+        self.plant_confirm_threshold = plant_confirm_threshold
         if model != MODEL:
             raise ValueError('Use the verified Qwen model name for this controlled experiment')
         self.key = read_credentials()
@@ -242,13 +249,24 @@ class QwenReviewer:
                 if cost > RESERVE_CNY:
                     raise ValueError('Cost exceeds reservation')
                 answer = parse_answer(data, self.target_confidence)
+                decision = answer['decision'] if answer['quality'] == 'adequate' else 'uncertain'
+                if target == 'potted plant' and self.plant_confirm_threshold is not None:
+                    # Q6 plant policy: category score is the acceptance criterion,
+                    # including uncertain/insufficient answers. Preserve the raw
+                    # answer and record this local policy separately for audits.
+                    if answer['target_confidence'] >= self.plant_confirm_threshold:
+                        decision = 'confirmed'
+                    elif decision == 'confirmed':
+                        decision = 'uncertain'
+                    metadata.update(effective_decision=decision,
+                                    decision_policy='plant_target_confidence_v1',
+                                    plant_confirm_threshold=self.plant_confirm_threshold)
                 metadata.update(state='completed', charged_cny=cost, usage=usage,
                                 response_id=data.get('id'), model_returned=data.get('model'),
                                 answer=answer, seconds=time.monotonic() - started,
                                 request_seconds=time.monotonic() - request_started)
                 metadata = json.loads(json.dumps(metadata).replace(self.key, '[REDACTED]'))
                 self._update(call_id, metadata)
-                decision = answer['decision'] if answer['quality'] == 'adequate' else 'uncertain'
                 return {'decision': decision, 'call_id': call_id, **metadata}
             except Exception as exc:
                 diagnostic = transport_diagnostic(exc)

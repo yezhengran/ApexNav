@@ -71,6 +71,8 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
             command.append('+active_view.confidence_review=true')
         if review_profile == 'linked_framing':
             command.append('+active_view.framing_review=true')
+            if review_backend == 'qwen':
+                command.append('+active_view.qwen_plant_confirm_threshold=0.6')
         if review_profile == 'linked_early':
             command.extend(['+active_view.early_review=true',
                             f'+active_view.early_review_threshold={early_review_threshold}'])
@@ -331,6 +333,12 @@ def main():
         spec['framing_review'] = {'geometry': 'linked_best_mask_depth_3d_bounds',
             'image_fraction': .8, 'surface_distance_min_m': 1.1,
             'arrival_margin_m': .3125, 'max_radius_m': 4.5, 'pitch_actions': False}
+        if args.review_backend == 'qwen':
+            spec['review']['plant_confirmation'] = {
+                'policy': 'plant_target_confidence_v1', 'threshold': .6,
+                'comparison': '>=', 'overrides_raw_decision_and_quality': True,
+                'below_threshold': 'never_confirm; preserve_existing_rejection_rules',
+                'other_targets': 'unchanged_structured_decision_and_quality'}
     if args.step_sync:
         spec["navigation_step_sync"] = True
     if args.failure_videos:
