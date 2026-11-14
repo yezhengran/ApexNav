@@ -3,6 +3,7 @@
 #include <exploration_manager/exploration_fsm.h>
 #include <exploration_manager/exploration_data.h>
 #include <vis_utils/planning_visualization.h>
+#include <plan_env/review_rank.h>
 
 using namespace std::chrono_literals;
 
@@ -15,17 +16,32 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   fd_.reset(new FSMData);
   active_view_ = ActiveView();
   if (first_init) {
+    node_->declare_parameter("navigation.step_sync", false);
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
     node_->declare_parameter("review.stop_check", false);
     node_->declare_parameter("review.preserve_stop", false);
+    node_->declare_parameter("review.automatic", false);
+    node_->declare_parameter("review.fused", false);
+    node_->declare_parameter("review.confidence", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
+  node_->get_parameter("navigation.step_sync", step_sync_);
+  observation_sequence_.reset();
   node_->get_parameter("review.late_step", review_late_step_);
   node_->get_parameter("review.lineage", review_lineage_);
   node_->get_parameter("review.stop_check", review_stop_);
   node_->get_parameter("review.preserve_stop", review_preserve_stop_);
+  node_->get_parameter("review.automatic", review_automatic_);
+  node_->get_parameter("review.fused", review_fused_);
+  node_->get_parameter("review.confidence", review_confidence_);
+  if (review_confidence_ && (!review_fused_ || review_late_step_ != 400))
+    throw std::invalid_argument("Confidence profile requires fused review and step 400");
+  if (review_fused_ && !review_automatic_)
+    throw std::invalid_argument("Fused review requires automatic scheduling");
+  if (review_automatic_ && (!review_enabled_ || !review_lineage_ || !step_sync_ || review_stop_))
+    throw std::invalid_argument("Automatic review requires linked step-sync mode without STOP review");
   if (review_preserve_stop_ && !review_stop_)
     throw std::invalid_argument("Preserving STOP eligibility requires STOP review");
   if (review_stop_ && (!review_enabled_ || !review_lineage_))
@@ -36,6 +52,10 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   review_pending_id_ = -1;
   review_pending_selection_ = -1;
   review_pending_high_confidence_stop_ = false;
+  review_pending_automatic_ = false;
+  review_pending_inspection_ = false;
+  inspection_candidates_.clear();
+  inspection_suppressed_at_ = -1;
   ++review_episode_;
   review_resume_path_.clear();
   review_fallback_logged_.clear();
@@ -51,12 +71,54 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   expl_manager_.reset(new ExplorationManager);
   expl_manager_->initialize(node_);
   expl_manager_->object_map2d_->stop_review_gating_ = review_stop_;
+  expl_manager_->object_map2d_->fused_review_gating_ = review_fused_;
+  expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
   visualization_.reset(new PlanningVisualization(node_));
   fp_->vis_scale_ = expl_manager_->sdf_map_->getResolution() * FSMConstants::VIS_SCALE_FACTOR;
 
   state_ = ROS_STATE::INIT;
 
   if (!first_init) return;  // Skip timer/sub/pub creation on re-init (episode reset)
+
+  observation_service_ = node_->create_service<plan_env::srv::ApplyObservation>(
+      "/habitat/apply_observation",
+      [this](const plan_env::srv::ApplyObservation::Request::SharedPtr request,
+             plan_env::srv::ApplyObservation::Response::SharedPtr response) {
+        const auto& frame = request->observation;
+        response->episode_token = frame.episode_token;
+        response->observation_id = frame.observation_id;
+        const bool initial = frame.observation_id == 0;
+        if (!step_sync_ || !observation_sequence_.accepts(frame.episode_token, frame.observation_id) ||
+            (initial ? state_ != ROS_STATE::INIT :
+             (state_ != ROS_STATE::WAIT_ACTION_FINISH && state_ != ROS_STATE::FINISH))) {
+          response->reason = "disabled, stale/out-of-order observation, or invalid planner state";
+          return;
+        }
+        const auto& detection = frame.detections;
+        if (frame.depth.data.empty() || frame.depth.header.stamp != frame.camera_pose.header.stamp ||
+            frame.depth.header.stamp != frame.robot_pose.header.stamp ||
+            !std::isfinite(frame.itm_score) || !std::isfinite(frame.confidence_threshold) ||
+            detection.point_clouds.size() != detection.confidence_scores.size() ||
+            detection.point_clouds.size() != detection.label_indices.size() ||
+            (detection.episode_token && (detection.episode_token != frame.episode_token ||
+             detection.observation_id != frame.observation_id))) {
+          response->reason = "inconsistent observation packet";
+          return;
+        }
+        odometryCallback(std::make_shared<nav_msgs::msg::Odometry>(frame.robot_pose));
+        auto threshold = std::make_shared<std_msgs::msg::Float64>();
+        threshold->data = frame.confidence_threshold;
+        confidenceThresholdCallback(threshold);
+        expl_manager_->sdf_map_->applyObservation(frame);
+        observation_sequence_.commit(frame.episode_token, frame.observation_id);
+        expl_manager_->object_map2d_->logCandidateScores(frame.observation_id);
+        response->accepted = true;
+        response->reason = "applied";
+        RCLCPP_INFO(node_->get_logger(),
+            "[Observation applied] step=%u position=(%.6f,%.6f) itm=%.6f masks=%zu",
+            frame.observation_id, fd_->odom_pos_(0), fd_->odom_pos_(1),
+            frame.itm_score, detection.point_clouds.size());
+      });
 
   evidence_sub_ = node_->create_subscription<plan_env::msg::ReviewEvidence>(
       "/habitat/review_evidence", 10,
@@ -70,6 +132,9 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
         conflicting_evidence_.clear();
         for (int id : msg->reliable_candidate_ids) if (id > 0) reliable_evidence_.insert(id - 1);
         for (int id : msg->conflicting_candidate_ids) if (id > 0) conflicting_evidence_.insert(id - 1);
+        inspection_candidates_.clear();
+        if (review_fused_)
+          for (int id : msg->inspection_candidate_ids) if (id > 0) inspection_candidates_.insert(id - 1);
         evidence_revisions_.clear();
         for (size_t i = 0; i < msg->candidate_ids.size(); ++i)
           if (msg->candidate_ids[i] > 0 && msg->revisions[i] <= msg->observation_id)
@@ -88,13 +153,13 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   trigger_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
       "/move_base_simple/goal", 10,
       std::bind(&ExplorationFSM::triggerCallback, this, std::placeholders::_1));
-  odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+  if (!step_sync_) odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
       "/odom_world", 10,
       std::bind(&ExplorationFSM::odometryCallback, this, std::placeholders::_1));
   habitat_state_sub_ = node_->create_subscription<std_msgs::msg::Int32>(
       "/habitat/state", 10,
       std::bind(&ExplorationFSM::habitatStateCallback, this, std::placeholders::_1));
-  confidence_threshold_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
+  if (!step_sync_) confidence_threshold_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
       "/detector/confidence_threshold", 10,
       std::bind(&ExplorationFSM::confidenceThresholdCallback, this, std::placeholders::_1));
 
@@ -123,42 +188,24 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
           RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review result");
           return;
         }
-        const bool inconclusive = msg->data[1] == ObjectMap2D::UNCERTAIN ||
-            msg->data[1] == ObjectMap2D::PENDING_EVIDENCE;
-        const bool preserve_stop = review_preserve_stop_ &&
-            review_pending_high_confidence_stop_ && inconclusive;
-        if (!expl_manager_->object_map2d_->setReviewState(
-                review_pending_id_, msg->data[1], preserve_stop)) {
-          RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review state");
+        if (review_confidence_) return;  // No unscored result may bypass the atomic channel.
+        acceptReviewResult(msg->data[0], msg->data[1]);
+      });
+
+  scored_review_sub_ = node_->create_subscription<plan_env::msg::ScoredReviewResult>(
+      "/habitat/scored_review_result", 10,
+      [this](const plan_env::msg::ScoredReviewResult::SharedPtr msg) {
+        auto map = expl_manager_->object_map2d_;
+        if (!validReviewReceipt(review_confidence_, review_pending_id_, msg->candidate_id,
+            msg->episode_token, map->evidence_episode_token_, msg->observation_id,
+            review_step_, msg->decision, msg->target_confidence)) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid atomic scored review result");
           return;
         }
-        RCLCPP_INFO(node_->get_logger(), "[Review decision] episode=%d id=%d state=%d step=%d",
-            review_episode_, msg->data[0], msg->data[1], review_step_);
-        active_view_ = ActiveView();
-        expl_manager_->ed_->next_pos_ = review_resume_pos_;
-        expl_manager_->ed_->next_best_path_ = review_resume_path_;
-        const bool fallback = review_step_ >= review_late_step_ ||
-            review_pending_selection_ == EXPL_RESULT::SEARCH_SUSPICIOUS_OBJECT ||
-            review_pending_selection_ == EXPL_RESULT::SEARCH_EXTREME;
-        if (preserve_stop)
-          RCLCPP_INFO(node_->get_logger(), "[Review preserve STOP] episode=%d id=%d state=%d step=%d",
-              review_episode_, msg->data[0], msg->data[1], review_step_);
-        if (inconclusive && fallback &&
-            review_fallback_logged_.insert(review_pending_id_).second)
-          RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
-              review_episode_, msg->data[0],
-              review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
-        fd_->final_result_ = (msg->data[1] == ObjectMap2D::CONFIRMED ||
-            (inconclusive && (fallback || preserve_stop))) ?
-            FINAL_RESULT::SEARCH_OBJECT : FINAL_RESULT::EXPLORE;
-        fd_->replan_flag_ = true;
-        review_replan_ = true;  // A revoked target must not reuse its old route.
-        std_msgs::msg::Int32 ack;
-        ack.data = msg->data[0];
-        review_pending_id_ = -1;
-        review_pending_high_confidence_stop_ = false;
-        // SEARCH_OBJECT returns through the original arrival checks; never issue STOP here.
-        review_ack_pub_->publish(ack);
+        // Same callback: the numeric answer is visible before replan/ack.
+        map->qwen_confidences_[review_pending_id_] = msg->target_confidence;
+        acceptReviewResult(msg->candidate_id, msg->decision);
+        map->logCandidateScores(msg->observation_id);
       });
 
   /* ROS2 Publisher */
@@ -170,6 +217,63 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
 }
 
 // FSM between ROS and Habitat for action planning and execution
+void ExplorationFSM::acceptReviewResult(int candidate, int decision) {
+  const bool inconclusive = decision == ObjectMap2D::UNCERTAIN ||
+      decision == ObjectMap2D::PENDING_EVIDENCE;
+  const bool preserve_stop = review_preserve_stop_ &&
+      review_pending_high_confidence_stop_ && inconclusive;
+  if (!expl_manager_->object_map2d_->setReviewState(
+          review_pending_id_, decision, preserve_stop)) {
+    RCLCPP_ERROR(node_->get_logger(), "Invalid selected-target review state");
+    return;
+  }
+  RCLCPP_INFO(node_->get_logger(), "[Review decision] episode=%d id=%d state=%d step=%d",
+      review_episode_, candidate, decision, review_step_);
+  active_view_ = ActiveView();
+  if (review_pending_automatic_) {
+    // REVIEW_TARGET is not a simulator motion. Preserve the last real
+    // action for the original stuck/arrival logic. A semantic decision
+    // about any candidate must never make the current route a STOP target.
+    if (!review_pending_inspection_) fd_->newest_action_ = review_resume_action_;
+    if (!inconclusive || review_fused_) {
+      fd_->final_result_ = FINAL_RESULT::EXPLORE;
+      fd_->replan_flag_ = true;
+      review_replan_ = true;
+    }
+    std_msgs::msg::Int32 ack;
+    ack.data = candidate;
+    review_pending_id_ = -1;
+    review_pending_automatic_ = false;
+    review_pending_inspection_ = false;
+    review_ack_pub_->publish(ack);
+    return;
+  }
+  expl_manager_->ed_->next_pos_ = review_resume_pos_;
+  expl_manager_->ed_->next_best_path_ = review_resume_path_;
+  const bool fallback = review_step_ >= review_late_step_ ||
+      review_pending_selection_ == EXPL_RESULT::SEARCH_SUSPICIOUS_OBJECT ||
+      review_pending_selection_ == EXPL_RESULT::SEARCH_EXTREME;
+  if (preserve_stop)
+    RCLCPP_INFO(node_->get_logger(), "[Review preserve STOP] episode=%d id=%d state=%d step=%d",
+        review_episode_, candidate, decision, review_step_);
+  if (inconclusive && fallback &&
+      review_fallback_logged_.insert(review_pending_id_).second)
+    RCLCPP_INFO(node_->get_logger(), "[Review fallback] episode=%d id=%d reason=%s step=%d",
+        review_episode_, candidate,
+        review_step_ >= review_late_step_ ? "step_budget" : "no_passable_frontier", review_step_);
+  fd_->final_result_ = (decision == ObjectMap2D::CONFIRMED ||
+      (inconclusive && (fallback || preserve_stop))) ?
+      FINAL_RESULT::SEARCH_OBJECT : FINAL_RESULT::EXPLORE;
+  fd_->replan_flag_ = true;
+  review_replan_ = true;  // A revoked target must not reuse its old route.
+  std_msgs::msg::Int32 ack;
+  ack.data = candidate;
+  review_pending_id_ = -1;
+  review_pending_high_confidence_stop_ = false;
+  // SEARCH_OBJECT returns through the original arrival checks; never issue STOP here.
+  review_ack_pub_->publish(ack);
+}
+
 void ExplorationFSM::FSMCallback()
 {
   exec_timer_->cancel();
@@ -210,8 +314,14 @@ void ExplorationFSM::FSMCallback()
     }
 
     case ROS_STATE::PLAN_ACTION: {
+      // Review qualified cached frames even during the initial scan. This does
+      // not consume a motion, increment the scan counter, or change arrival.
+      if (maybeReviewAutomatic()) {
+        transitState(ROS_STATE::PUB_ACTION, "automatic_review");
+        break;
+      }
       // Initial action sequence: perform orientation calibration turns
-      if (fd_->init_action_count_ < 1 + 12 + 1 + 12) {
+      if (fd_->init_action_count_ < 1 + 12 + 1 + 12 && !(review_fused_ && active_view_.id)) {
         if (fd_->init_action_count_ < 1)
           fd_->newest_action_ = ACTION::TURN_DOWN;
         else if (fd_->init_action_count_ < 1 + 12)
@@ -501,6 +611,7 @@ int ExplorationFSM::callActionPlanner()
 
 bool ExplorationFSM::maybeReviewSelected(int exploration_result)
 {
+  if (review_automatic_) return false;
   const int id = expl_manager_->ed_->selected_object_id_;
   vector<double> data;
   auto& objects = expl_manager_->object_map2d_;
@@ -553,16 +664,64 @@ bool ExplorationFSM::maybeReviewStop()
   return requestReview(id, selected_mode_, info, true);
 }
 
-bool ExplorationFSM::requestReview(int id, int exploration_result, const vector<double>& data, bool at_stop)
+bool ExplorationFSM::maybeReviewAutomatic()
+{
+  if (!review_automatic_ || review_pending_id_ >= 0 || active_view_.id) return false;
+  auto& objects = expl_manager_->object_map2d_;
+  // Python publishes only threshold-qualified, novel, budget-eligible frames.
+  // Sort IDs so callback/unordered-map iteration cannot affect scheduling.
+  std::set<int> candidates;
+  for (const auto& entry : evidence_revisions_) candidates.insert(entry.first);
+  for (int id : candidates) {
+    const int status = objects->reviewState(id);
+    if (status == ObjectMap2D::CONFIRMED || status == ObjectMap2D::REJECTED) continue;
+    if (reviewed_revisions_.count(id) && evidence_revisions_.at(id) <= reviewed_revisions_.at(id)) continue;
+    vector<double> data;
+    if (!objects->reviewInfo(id, data)) continue;
+    if (review_fused_ && !objects->reviewEligible(id)) continue;
+    reviewed_revisions_[id] = evidence_revisions_.at(id);
+    RCLCPP_INFO(node_->get_logger(), "[Automatic review trigger] id=%d evidence_step=%u step=%d",
+        id + 1, evidence_revisions_.at(id), review_step_);
+    return requestReview(id, selected_mode_, data, false, true);
+  }
+  if (review_fused_ && !inspection_candidates_.empty()) {
+    const int alternative = expl_manager_->reachableConfirmedTarget(fd_->odom_pos_);
+    if (alternative >= 0) {
+      if (inspection_suppressed_at_ != review_step_) {
+        RCLCPP_INFO(node_->get_logger(), "[Inspection deferred] confirmed_id=%d pending=%zu step=%d",
+            alternative + 1, inspection_candidates_.size(), review_step_);
+        inspection_suppressed_at_ = review_step_;
+      }
+      return false;
+    }
+    for (int id : inspection_candidates_) {
+      vector<double> data;
+      if (objects->reviewState(id) != ObjectMap2D::UNCERTAIN ||
+          !objects->reviewEligible(id, false) || !objects->reviewInfo(id, data)) continue;
+      RCLCPP_INFO(node_->get_logger(), "[Conditional inspection trigger] id=%d step=%d", id + 1, review_step_);
+      return requestReview(id, selected_mode_, data, false, true, true);
+    }
+  }
+  return false;
+}
+
+bool ExplorationFSM::requestReview(int id, int exploration_result, const vector<double>& data,
+    bool at_stop, bool automatic, bool inspection)
 {
   review_pending_id_ = id;
   review_pending_selection_ = exploration_result;
   review_pending_high_confidence_stop_ = at_stop && data[1] >= data[2];
-  review_resume_pos_ = expl_manager_->ed_->next_pos_;
-  review_resume_path_ = expl_manager_->ed_->next_best_path_;
+  review_pending_automatic_ = automatic;
+  review_pending_inspection_ = inspection;
+  review_resume_action_ = fd_->newest_action_;
+  if (!automatic) {
+    review_resume_pos_ = expl_manager_->ed_->next_pos_;
+    review_resume_path_ = expl_manager_->ed_->next_best_path_;
+  }
   std_msgs::msg::Float64MultiArray target;
   target.data = data;
   if (at_stop) target.data.push_back(1.0);
+  if (automatic) target.data.push_back(review_fused_ ? (inspection ? 4.0 : 3.0) : 2.0);
   review_target_pub_->publish(target);
   fd_->newest_action_ = ACTION::REVIEW_TARGET;
   RCLCPP_INFO(node_->get_logger(),

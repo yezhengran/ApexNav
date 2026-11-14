@@ -109,6 +109,11 @@ def record_episode_identity(directory, number, scene, episode, target):
     path = Path(directory) / "episode_set.json"
     entries = json.loads(path.read_text()) if path.exists() else []
     entry = {"scene_id": scene, "episode_id": str(episode), "target": target}
+    planned_path = Path(directory) / "planned-episodes.json"
+    if planned_path.exists():
+        planned = json.loads(planned_path.read_text())
+        if number < 1 or number > len(planned) or planned[number - 1] != entry:
+            raise ValueError("Episode differs from the frozen full-dataset plan")
     if number <= len(entries):
         if entries[number - 1] != entry:
             raise ValueError("Episode order changed; refusing to mix a different evaluation set")
@@ -149,3 +154,8 @@ class EpisodeVideo:
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(self.temporary, destination)
         return str(destination)
+
+    def discard(self):
+        """Close the encoder before deleting a successful episode's temporary video."""
+        self.writer.close()
+        self.temporary.unlink()

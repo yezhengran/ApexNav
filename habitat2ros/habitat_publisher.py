@@ -104,6 +104,7 @@ class ROSPublisherNonNode:
         depth_msg.header.stamp = ros_time
         depth_msg.header.frame_id = "world"
         self.depth_pub.publish(depth_msg)
+        return depth_msg
 
     def publish_rgb(self, ros_time, rgb_image):
         rgb_msg = self.bridge.cv2_to_imgmsg(rgb_image, encoding="rgb8")
@@ -122,6 +123,7 @@ class ROSPublisherNonNode:
             orientation=_quat_from_array(quaternion_from_euler(0, 0, copy_compass)),
         )
         self.odom_pub.publish(odom)
+        return odom
 
     def publish_camera_odom(self, ros_time, gps, compass, pitch):
         copy_compass = deepcopy(compass)
@@ -137,6 +139,7 @@ class ROSPublisherNonNode:
                 )),
         )
         self.pose_pub.publish(sensor_pose)
+        return sensor_pose
 
     def habitat_publish_ros_topic(self, observations):
         depth_image = observations["depth"]
@@ -145,7 +148,8 @@ class ROSPublisherNonNode:
         compass = observations["compass"]
         camera_pitch = observations["camera_pitch"]
         ros_time = self.node.get_clock().now().to_msg()
-        self.publish_depth(ros_time, depth_image)
-        self.publish_camera_odom(ros_time, gps, compass, camera_pitch)
+        depth = self.publish_depth(ros_time, depth_image)
+        camera = self.publish_camera_odom(ros_time, gps, compass, camera_pitch)
         self.publish_rgb(ros_time, rgb_image)
-        self.publish_robot_odom(ros_time, gps, compass)
+        robot = self.publish_robot_odom(ros_time, gps, compass)
+        return depth, camera, robot

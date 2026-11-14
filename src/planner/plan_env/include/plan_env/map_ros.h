@@ -25,6 +25,7 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <plan_env/msg/detection_association.hpp>
+#include <plan_env/msg/navigation_observation.hpp>
 
 // PCL for point cloud processing
 #include <pcl/filters/voxel_grid.h>
@@ -62,6 +63,7 @@ public:
   void setMap(SDFMap2D* map);
   void setNode(rclcpp::Node::SharedPtr node);
   void init();
+  void applyObservation(const plan_env::msg::NavigationObservation& observation);
 
 private:
   // ROS2 callback functions

@@ -61,7 +61,7 @@ from habitat.utils.visualizations.utils import (
 )
 
 # ROS message imports
-from plan_env.msg import MultipleMasksWithConfidence, DetectionAssociation, ReviewEvidence
+from plan_env.msg import MultipleMasksWithConfidence, DetectionAssociation, ReviewEvidence, ScoredReviewResult
 
 # Local project imports
 from basic_utils.failure_check.count_files import count_files_in_directory
@@ -112,9 +112,11 @@ class HabitatEvalNode(Node):
         self.review_target = None
         self.review_ack = None
         self.linked_view = None
+        self.navigation_barrier = None
         self.evidence_pub = self.create_publisher(ReviewEvidence, '/habitat/review_evidence', qos)
         self.create_subscription(DetectionAssociation, '/detector/associations',
                                  self.association_callback, qos)
+        self.scored_review_pub = self.create_publisher(ScoredReviewResult, "/habitat/scored_review_result", qos)
         self.review_result_pub = self.create_publisher(
             Int32MultiArray, "/habitat/review_result", qos)
         self.create_subscription(
@@ -186,6 +188,8 @@ class HabitatEvalNode(Node):
         reliable, conflicts = view.stop_quality()
         msg.reliable_candidate_ids = reliable
         msg.conflicting_candidate_ids = conflicts
+        if hasattr(view, "inspection_readiness"):
+            msg.inspection_candidate_ids = view.inspection_readiness()
         self.evidence_pub.publish(msg)
 
     def review_ack_callback(self, msg):
@@ -214,7 +218,13 @@ class HabitatEvalNode(Node):
     def submit_review(self, decision):
         self.publish_evidence_readiness()
         self.review_ack = None
-        self.publish_int32_array(self.review_result_pub, list(decision))
+        if self.linked_view is not None and getattr(self.linked_view.cfg, 'confidence_review', False):
+            self.scored_review_pub.publish(ScoredReviewResult(
+                episode_token=self.linked_view.episode_token, observation_id=self.linked_view.step,
+                candidate_id=decision[0], decision=decision[1],
+                target_confidence=self.linked_view.qwen_scores[decision[0]]))
+        else:
+            self.publish_int32_array(self.review_result_pub, list(decision))
         deadline = time.monotonic() + 5
         while self.review_ack != decision[0]:
             if not rclpy.ok() or time.monotonic() > deadline:
@@ -254,9 +264,10 @@ class HabitatEvalNode(Node):
         """Timer callback to publish habitat observations and trigger messages"""
         if self.msg_observations is None:
             return
-        tmp = deepcopy(self.msg_observations)
-        self.ros_pub.habitat_publish_ros_topic(tmp)
-        self.publish_float64(self.confidence_threshold_pub, self.fusion_threshold)
+        if self.navigation_barrier is None:
+            tmp = deepcopy(self.msg_observations)
+            self.ros_pub.habitat_publish_ros_topic(tmp)
+            self.publish_float64(self.confidence_threshold_pub, self.fusion_threshold)
         trigger = PoseStamped()
         self.trigger_pub.publish(trigger)
 
@@ -318,6 +329,12 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
     # Extract configuration parameters
     video_output_path = cfg.video_output_path.format(split=cfg.habitat.dataset.split)
     need_video = cfg.need_video
+    if cfg.get("navigation_step_sync", False):
+        from habitat2ros.observation_barrier import ObservationBarrier
+        node.navigation_barrier = ObservationBarrier(node, video_output_path)
+    video_policy = cfg.get("video_policy", "all")
+    if video_policy not in ("all", "failures"):
+        raise ValueError("video_policy must be all or failures")
     record_file_path = os.path.join(video_output_path, cfg.record_file_name)
     continue_path = os.path.join(video_output_path, cfg.continue_file_name)
     max_episode_steps = cfg.habitat.environment.max_episode_steps
@@ -333,7 +350,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
         if not getattr(view_cfg, 'linked_evidence', False):
             raise ValueError('Qwen verification requires explicit linked image evidence')
         from vlm.qwen_review import QwenReviewer
-        review_verifier = QwenReviewer(view_cfg.qwen_budget_ledger, view_cfg.qwen_model)
+        review_verifier = QwenReviewer(view_cfg.qwen_budget_ledger, view_cfg.qwen_model,
+                                       target_confidence=getattr(view_cfg, "confidence_review", False))
 
     llm_cfg = cfg.llm
     llm_client = llm_cfg.llm_client
@@ -435,6 +453,19 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 from vlm.linked_review import LinkedTargetReviewer
                 reviewer_class = LinkedTargetReviewer
                 reviewer_options['episode_token'] = time.time_ns()
+            if getattr(view_cfg, 'early_review', False):
+                if not reviewer_options or not cfg.get('navigation_step_sync', False):
+                    raise ValueError('Early review requires linked evidence and step synchronization')
+                from vlm.early_review import EarlyTargetReviewer
+                reviewer_class = EarlyTargetReviewer
+            if getattr(view_cfg, "fused_review", False):
+                if not reviewer_options or not cfg.get("navigation_step_sync", False):
+                    raise ValueError("Fused review requires linked step synchronization")
+                from vlm.fused_review import FusedTargetReviewer
+                reviewer_class = FusedTargetReviewer
+            if getattr(view_cfg, 'confidence_review', False):
+                from vlm.confidence_review import ConfidenceTargetReviewer
+                reviewer_class = ConfidenceTargetReviewer
             view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
                 label.split("|")[0].strip(), review_verifier or itmclient.itm_score,
@@ -462,6 +493,10 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             episode_video = EpisodeVideo(video_output_path, num_total + 1)
             episode_video.append(frame)
 
+        if node.navigation_barrier is not None:
+            node.navigation_barrier.begin_episode(view.episode_token if node.linked_view else time.time_ns())
+            node.navigation_barrier.apply(node.msg_observations, 0)
+
         # Start publishing basic information and trigger messages
         node.start_observation_timer()
 
@@ -487,7 +522,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
 
             # Keep publishing observations, confidence, and trigger so FSM
             # always has fresh odom and can re-trigger after episode transitions
-            if node.msg_observations is not None:
+            if node.msg_observations is not None and node.navigation_barrier is None:
                 node.ros_pub.habitat_publish_ros_topic(deepcopy(node.msg_observations))
                 node.publish_float64(node.confidence_threshold_pub, node.fusion_threshold)
                 trigger = PoseStamped()
@@ -522,6 +557,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 if view is not None and node.global_action in (ACTION.INSPECT, ACTION.INSPECTION_FAILED):
                     reachable = node.global_action == ACTION.INSPECT
                     node.global_action = None
+                    if getattr(view_cfg, 'confidence_review', False):
+                        node.wait_for_associations()
                     decision = view.finish_inspection(reachable)
                     node.request_inspection([])
                     node.submit_review(decision)
@@ -557,7 +594,7 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_EXEC)
 
             observations = env.step(action)
-            raw_rgb = observations["rgb"].copy() if view is not None else None
+            raw_rgb = observations["rgb"].copy() if view is not None or node.navigation_barrier else None
 
             # Calculate ITM cosine similarity score
             cosine = get_itm_message_cosine(observations["rgb"], label, room)
@@ -575,7 +612,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             observations["camera_pitch"] = camera_pitch
             node.msg_observations = deepcopy(observations)
             del observations["camera_pitch"]
-            node.ros_pub.habitat_publish_ros_topic(node.msg_observations)
+            if node.navigation_barrier is None:
+                node.ros_pub.habitat_publish_ros_topic(node.msg_observations)
 
             # Generate and publish object point clouds
             obj_point_cloud_list = get_object_point_cloud(
@@ -597,7 +635,11 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                 cld_with_score_msg.episode_token = view.episode_token
                 cld_with_score_msg.observation_id = count_steps
                 cld_with_score_msg.header.stamp = node.get_clock().now().to_msg()
-            node.cld_with_score_pub.publish(cld_with_score_msg)
+            if node.navigation_barrier is None:
+                node.cld_with_score_pub.publish(cld_with_score_msg)
+            else:
+                node.navigation_barrier.apply(node.msg_observations, count_steps, cosine,
+                                              cld_with_score_msg, int(action), raw_rgb)
 
             # Generate video frame
             info = env.get_metrics()
@@ -681,9 +723,12 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
 
         video_path = ""
         if need_video:
-            video_path = os.path.relpath(
-                episode_video.finish(img2video_output_path, video_name), video_output_path
-            )
+            if video_policy == "failures" and success:
+                episode_video.discard()
+            else:
+                video_path = os.path.relpath(
+                    episode_video.finish(img2video_output_path, video_name), video_output_path
+                )
 
         # Display average performance metrics
         table1 = PrettyTable(["Metric", "Average"])

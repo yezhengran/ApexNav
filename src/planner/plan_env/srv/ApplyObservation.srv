@@ -1,0 +1,6 @@
+plan_env/NavigationObservation observation
+---
+bool accepted
+string reason
+uint64 episode_token
+uint32 observation_id

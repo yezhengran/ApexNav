@@ -2,6 +2,7 @@
 #define _SDF_MAP2D_H
 
 #include <rclcpp/rclcpp.hpp>
+#include <plan_env/msg/navigation_observation.hpp>
 #include <Eigen/Eigen>
 #include <Eigen/StdVector>
 #include <iostream>
@@ -74,6 +75,7 @@ public:
 
   // Map processing functions
   void updateESDFMap();
+  void applyObservation(const plan_env::msg::NavigationObservation& observation);
 
   // Map property accessors
   void getRegion(Eigen::Vector2d& ori, Eigen::Vector2d& size);

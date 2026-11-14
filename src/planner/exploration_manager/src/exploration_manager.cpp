@@ -85,6 +85,21 @@ void ExplorationManager::initialize(rclcpp::Node::SharedPtr node)
   RCLCPP_INFO(node_->get_logger(), "[ExplorationManager] KinoAstar and GCopter initialized for real-world mode");
 }
 
+int ExplorationManager::reachableConfirmedTarget(const Vector3d& start)
+{
+  vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> clouds;
+  vector<int> ids;
+  object_map2d_->getTopConfidenceObjectCloud(clouds, true, false, &ids);
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (object_map2d_->reviewState(ids[i]) != ObjectMap2D::CONFIRMED ||
+        !object_map2d_->reviewEligible(ids[i], false)) continue;
+    Vector2d goal;
+    vector<Vector2d> path;
+    if (searchObjectPath(start, clouds[i], goal, path)) return ids[i];
+  }
+  return -1;
+}
+
 int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw)
 {
   Vector2d pos2d = Vector2d(pos(0), pos(1));

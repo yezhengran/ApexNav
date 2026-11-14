@@ -169,24 +169,30 @@ void MapROS::init()
       "/grid_map/confidence_map", 10);
 
   // Setup subscribers for object detection and ITM scores
-  detected_object_cloud_sub_ = node_->create_subscription<plan_env::msg::MultipleMasksWithConfidence>(
-      "/detector/clouds_with_scores", 10,
-      std::bind(&MapROS::detectedObjectCloudCallback, this, std::placeholders::_1));
-  itm_score_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
-      "/blip2/cosine_score", 10,
-      std::bind(&MapROS::itmScoreCallback, this, std::placeholders::_1));
+  // The optional simulator transaction owns these updates. Legacy sensor
+  // subscriptions remain exactly as before when navigation.step_sync is off.
+  const bool step_sync = node_->has_parameter("navigation.step_sync") &&
+      node_->get_parameter("navigation.step_sync").as_bool();
+  if (!step_sync) {
+    detected_object_cloud_sub_ = node_->create_subscription<plan_env::msg::MultipleMasksWithConfidence>(
+        "/detector/clouds_with_scores", 10,
+        std::bind(&MapROS::detectedObjectCloudCallback, this, std::placeholders::_1));
+    itm_score_sub_ = node_->create_subscription<std_msgs::msg::Float64>(
+        "/blip2/cosine_score", 10,
+        std::bind(&MapROS::itmScoreCallback, this, std::placeholders::_1));
 
-  // Setup synchronized subscribers for depth image and pose data
-  rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
-  depth_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
-      node_, "/map_ros/depth", qos_profile);
-  pose_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(
-      node_, "/map_ros/pose", qos_profile);
+    // Setup synchronized subscribers for depth image and pose data
+    rmw_qos_profile_t qos_profile = rmw_qos_profile_sensor_data;
+    depth_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image>>(
+        node_, "/map_ros/depth", qos_profile);
+    pose_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(
+        node_, "/map_ros/pose", qos_profile);
 
-  sync_image_pose_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImagePose>>(
-      SyncPolicyImagePose(20), *depth_sub_, *pose_sub_);
-  sync_image_pose_->registerCallback(
-      std::bind(&MapROS::depthPoseCallback, this, std::placeholders::_1, std::placeholders::_2));
+    sync_image_pose_ = std::make_shared<message_filters::Synchronizer<SyncPolicyImagePose>>(
+        SyncPolicyImagePose(20), *depth_sub_, *pose_sub_);
+    sync_image_pose_->registerCallback(
+        std::bind(&MapROS::depthPoseCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
 
   // Initialize object tracking variables
   continue_over_depth_count_ = -1;
@@ -378,6 +384,19 @@ void MapROS::detectedObjectCloudCallback(const plan_env::msg::MultipleMasksWithC
   double object_map_process_time = (node_->get_clock()->now() - t1).seconds();
   RCLCPP_INFO_THROTTLE(node_->get_logger(), *node_->get_clock(), 10000,
       "[Calculating Time] Object Map process time = %.3f s", object_map_process_time);
+}
+
+void MapROS::applyObservation(const plan_env::msg::NavigationObservation& observation)
+{
+  // Called on the node's mutually exclusive default callback group. Complete
+  // all map inputs (including ESDF) before replying to the simulator barrier.
+  itm_score_ = observation.itm_score;
+  depthPoseCallback(std::make_shared<sensor_msgs::msg::Image>(observation.depth),
+      std::make_shared<nav_msgs::msg::Odometry>(observation.camera_pose));
+  if (observation.observation_id > 0)
+    detectedObjectCloudCallback(
+        std::make_shared<plan_env::msg::MultipleMasksWithConfidence>(observation.detections));
+  updateESDFCallback();
 }
 
 void MapROS::updateESDFCallback()

@@ -20,6 +20,11 @@
 namespace apexnav_planner {
 SDFMap2D::~SDFMap2D() = default;
 
+void SDFMap2D::applyObservation(const plan_env::msg::NavigationObservation& observation)
+{
+  map_ros_->applyObservation(observation);
+}
+
 void SDFMap2D::initMap(rclcpp::Node::SharedPtr node)
 {
   mp_.reset(new MapParam2D);

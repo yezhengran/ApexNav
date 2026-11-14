@@ -92,6 +92,8 @@ public:
   shared_ptr<Gcopter> gcopter_;               ///< Trajectory optimizer (for real-world)
   shared_ptr<KinoAstar> kinoastar_;           ///< Kinodynamic A* planner (for real-world)
 
+  int reachableConfirmedTarget(const Vector3d& start);
+
   typedef shared_ptr<ExplorationManager> Ptr;
 
 private:

@@ -33,7 +33,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MultipleMasksWithConfidence.msg"
   "msg/DetectionAssociation.msg"
   "msg/ReviewEvidence.msg"
-  DEPENDENCIES std_msgs sensor_msgs
+  "msg/ScoredReviewResult.msg"
+  "msg/NavigationObservation.msg"
+  "srv/ApplyObservation.srv"
+  DEPENDENCIES std_msgs sensor_msgs nav_msgs
 )
 
 # Include 디렉토리 설정

@@ -6,6 +6,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <Eigen/Eigen>
 #include <memory>
+#include <map>
 #include <vector>
 #include <list>
 #include <utility>
@@ -122,6 +123,12 @@ public:
                      PENDING_EVIDENCE = 4 };
   uint64_t evidence_episode_token_ = 0;  // Reset with this episode's object map.
   bool stop_review_gating_ = false;
+  bool fused_review_gating_ = false;
+  bool confidence_review_ = false;
+  std::map<int, double> qwen_confidences_;
+  double navigationRank(const ObjectCluster& object) const;
+  void logCandidateScores(uint32_t step) const;
+  bool reviewEligible(int object_id, bool require_confidence = true) const;
   int reviewState(int object_id) const;
   bool setReviewState(int object_id, int state, bool preserve_stop = false);
   bool reviewInfo(int object_id, vector<double>& data) const;

@@ -1,5 +1,7 @@
 # ObjectNav 新窗口交接
 
+**最新完成（2026-11-14）：用户确认融合 0.5＋Qwen 0.5，Q5 两个固定演示已完成。** 新分支 `codex/objectnav-facing-confidence-review`、profile `linked_confidence`，179 运行源文件 `8b7c78660f4efd79162dfb858c0f4a219e972412c5dc14680bcee509e5b8948e`；独立 overlay `outputs/build/facing-confidence-20261114/install`。二次调用须到达安全点并完成朝向中心后的真实观测；输入仍用同对象全历史最高检测分数 crop，可复用旧图；Qwen 新增严格类别置信度，400 步后原可用未确认候选按 0.5/0.5 排序，未调用者用融合分数。chair10：197步成功、2次复查、20观测动作；tv885：77步成功、3次复查、39观测动作。两例均<400，加权仅离线验证；旧Q4两例/全量结果不改。7次HTTP中2次SSL按原有界规则恢复，0回合重开，0.04失败预留保持，总账本1.345770元。独立审计2例276帧/来源/朝向/分数/旧6119文件通过；91项Python/ROS/调度检查及C++排序/回执检查、独立构建通过。评测/规划器/四模型全部退出，禁止重跑任何旧入口；旧30和全量失败分析保持暂停。协议/审计在 `experiment_notes/qwen-facing-confidence-20261114/`，英文观看版在 `outputs/runs/qwen-facing-confidence-20261114/presentation-en/`。详见[本轮记录](experiments/2026-11-14-qwen-facing-confidence.zh-CN.md)。
+
 更新：2026-11-11。先读 AGENTS.md、docker/experiment_commands.zh-CN.md；最新用户指令优先于旧默认分支与提交频率。
 
 ## 当前状态：50+50 已结束，等待下一方法对齐

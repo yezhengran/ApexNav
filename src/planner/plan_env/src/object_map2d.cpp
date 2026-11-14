@@ -11,6 +11,7 @@
  */
 
 #include <plan_env/object_map2d.h>
+#include <plan_env/review_rank.h>
 
 namespace apexnav_planner {
 ObjectMap2D::ObjectMap2D(SDFMap2D* sdf_map, rclcpp::Node::SharedPtr node)
@@ -568,6 +569,25 @@ void ObjectMap2D::getAllConfidenceObjectClouds(
   }
 }
 
+double ObjectMap2D::navigationRank(const ObjectCluster& object) const {
+  const auto q = qwen_confidences_.find(object.id_);
+  return reviewRank(object.confidence_scores_[0], confidence_review_, review_late_eligible_,
+      reviewState(object.id_), q != qwen_confidences_.end(),
+      q != qwen_confidences_.end() ? q->second : 0.0);
+}
+
+void ObjectMap2D::logCandidateScores(uint32_t step) const {
+  if (!confidence_review_) return;
+  for (const auto& object : objects_) {
+    const auto q = qwen_confidences_.find(object.id_);
+    RCLCPP_INFO(node_->get_logger(),
+        "[Candidate scores] step=%u id=%d fusion=%.9f state=%d has_qwen=%d qwen=%.9f rank=%.9f late=%d",
+        step, object.id_+1, object.confidence_scores_[0], reviewState(object.id_),
+        q != qwen_confidences_.end(), q != qwen_confidences_.end() ? q->second : 0.0,
+        navigationRank(object), review_late_eligible_);
+  }
+}
+
 void ObjectMap2D::getTopConfidenceObjectCloud(
     vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>>& top_object_clouds,
     bool limited_confidence, bool extreme, vector<int>* object_ids)
@@ -585,14 +605,14 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
 
     // Sort by confidence score in descending order
     std::sort(
-        top_objects.begin(), top_objects.end(), [](const ObjectCluster& a, const ObjectCluster& b) {
-          return a.confidence_scores_[0] > b.confidence_scores_[0];
+        top_objects.begin(), top_objects.end(), [this](const ObjectCluster& a, const ObjectCluster& b) {
+          return navigationRank(a) > navigationRank(b);
         });
 
     // Extract point clouds for top-ranked objects
     for (auto top_obj : top_objects) {
       if (top_obj.confidence_scores_[0] <= 0.01)
-        break;  // Skip extremely low confidence objects
+        continue;  // Weighted ordering need not follow fusion-score ordering.
 
       pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>> top_object_cloud;
       top_object_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
@@ -647,18 +667,28 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
 
       // Include only high-confidence objects with primary label (0)
       const int review = reviewState(object.id_);
-      const bool waiting = stop_review_gating_ && !review_late_eligible_ &&
+      const bool waiting = (fused_review_gating_ && !review_late_eligible_ && review != CONFIRMED) ||
+          (stop_review_gating_ && !review_late_eligible_ &&
           !review_stop_preserved_.count(object.id_) &&
-          (review == UNCERTAIN || review == PENDING_EVIDENCE);
-      if ((!waiting && best_label == 0 && isConfidenceObject(object)) || review == CONFIRMED ||
-          (review_late_eligible_ && (review == UNCERTAIN || review == PENDING_EVIDENCE)))
+          (review == UNCERTAIN || review == PENDING_EVIDENCE));
+      // A late inconclusive review releases the hold, not the original
+      // confidence/label checks. Otherwise an old uncertain candidate enters
+      // this priority queue and preempts the original no-frontier ranking.
+      // Low-confidence candidates remain available in the unchanged fallback.
+      if ((!waiting && best_label == 0 && isConfidenceObject(object)) ||
+          (review == CONFIRMED && (!fused_review_gating_ || reviewEligible(object.id_, false))))
         top_objects.push_back(object);
     }
 
     // Sort filtered objects by confidence
     std::sort(
-        top_objects.begin(), top_objects.end(), [](const ObjectCluster& a, const ObjectCluster& b) {
-          return a.confidence_scores_[0] > b.confidence_scores_[0];
+        top_objects.begin(), top_objects.end(), [this](const ObjectCluster& a, const ObjectCluster& b) {
+          if (fused_review_gating_) {
+            const bool ac = reviewState(a.id_) == CONFIRMED && reviewEligible(a.id_, false);
+            const bool bc = reviewState(b.id_) == CONFIRMED && reviewEligible(b.id_, false);
+            if (ac != bc) return ac;
+          }
+          return navigationRank(a) > navigationRank(b);
         });
 
     // Extract point clouds from filtered objects
@@ -709,6 +739,20 @@ bool ObjectMap2D::reviewInfo(int object_id, vector<double>& data) const
           object.box_max2d_.x(), object.box_max2d_.y()};
   for (double value : data) if (!std::isfinite(value)) { data.clear(); return false; }
   return true;
+}
+
+bool ObjectMap2D::reviewEligible(int object_id, bool require_confidence) const
+{
+  if (object_id < 0 || object_id >= static_cast<int>(objects_.size())) return false;
+  const auto& object = objects_[object_id];
+  int max_func_score = 0, best_label = -1;
+  for (int label = 0; label < static_cast<int>(object.clouds_.size()); ++label) {
+    int score = object.observation_cloud_sums_[label] * object.confidence_scores_[label];
+    if (score > max_func_score) { max_func_score = score; best_label = label; }
+  }
+  return best_label == 0 && !object.good_cells_.empty() &&
+      object.observation_nums_[0] >= min_observation_num_ &&
+      (!require_confidence || object.confidence_scores_[0] >= min_confidence_);
 }
 
 bool ObjectMap2D::isConfidenceObject(const ObjectCluster& obj)

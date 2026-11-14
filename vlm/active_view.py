@@ -225,7 +225,13 @@ class SelectedTargetReviewer:
         qwen = getattr(self.cfg, 'backend', 'blip2') == 'qwen'
         model_reply = None
         if qwen:
-            model_reply = self.verifier(evidence['crop'], self.label)
+            from vlm.qwen_review import QwenTransportError
+            try:
+                model_reply = self.verifier(evidence['crop'], self.label)
+            except QwenTransportError as error:
+                self.event('verification_transport_error', candidate=target['id'], phase=phase,
+                           call_id=error.call_id, retryable=error.retryable, crop=str(crop_path))
+                raise
             decision = {'confirmed': self.CONFIRMED, 'uncertain': self.UNCERTAIN,
                         'rejected': self.REJECTED}[model_reply['decision']]
             partial_negative = decision == self.REJECTED and not evidence['complete']

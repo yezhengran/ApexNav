@@ -1,0 +1,5 @@
+uint64 episode_token
+uint32 observation_id
+int32 candidate_id
+int32 decision
+float64 target_confidence

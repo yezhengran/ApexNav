@@ -16,7 +16,8 @@ from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, read_rows, resume_state, save_result,
     record_episode_identity,
 )
-from run_batch import evaluation_command, stop_owned, resume_migration, source_provenance
+from run_batch import (evaluation_command, stop_owned, resume_migration, source_provenance,
+                       resume_contract, validate_resume_spec, validate_resume_config)
 from compare_runs import compare
 
 
@@ -92,11 +93,21 @@ class BatchTest(unittest.TestCase):
                                          review_profile=profile, uncertain_after_steps=400)
             self.assertIn('test_epi_num=66', command)
             self.assertIn('active_view.recent_evidence=true', command)
+
             self.assertIn(f"active_view.turn_first={str(profile == 'evidence_turn').lower()}", command)
             self.assertIn('active_view.itm_confirm_threshold=0.65', command)
             self.assertIn('active_view.itm_reject_threshold=0.2', command)
             self.assertEqual('active_view.linked_evidence=true' in command, profile in ('linked', 'linked_stop', 'linked_stop_preserve'))
             self.assertEqual('active_view.stop_review=true' in command, profile in ('linked_stop', 'linked_stop_preserve'))
+
+    def test_step_sync_is_explicit_and_shared_by_control_and_review(self):
+        for method in ('baseline', 'selected_review'):
+            legacy = evaluation_command('hm3dv2', 1, Path('/tmp/check'), True, method=method)
+            synchronized = evaluation_command('hm3dv2', 1, Path('/tmp/check'), True,
+                                              method=method, step_sync=True)
+            self.assertNotIn('+navigation_step_sync=true', legacy)
+            self.assertEqual(synchronized.count('+navigation_step_sync=true'), 1)
+            self.assertEqual([x for x in synchronized if x != '+navigation_step_sync=true'], legacy)
 
     def test_qwen_backend_is_explicit_and_does_not_replace_baseline_itm(self):
         command = evaluation_command('hm3dv2', 50, Path('/tmp/new-qwen'), True,
@@ -114,6 +125,46 @@ class BatchTest(unittest.TestCase):
                     for profile in ('linked_stop', 'linked_stop_preserve')]
         self.assertEqual(*commands)
 
+    def test_fused_review_profile_uses_map_threshold_and_separate_flag(self):
+        command = evaluation_command('hm3dv2', 1, Path('/tmp/fused'), True,
+            method='selected_review', review_profile='linked_fused', step_sync=True,
+            review_backend='qwen')
+        self.assertIn('+active_view.fused_review=true', command)
+        self.assertIn('active_view.linked_evidence=true', command)
+        self.assertIn('active_view.stop_review=false', command)
+        self.assertFalse(any('early_review' in x for x in command))
+        base = [sys.executable, str(ROOT/'docker/run_batch.py'), 'hm3dv2', '--dry-run',
+                '--method', 'selected_review', '--review-profile', 'linked_fused']
+        self.assertNotEqual(subprocess.run(base, capture_output=True).returncode, 0)
+        good = subprocess.run(base+['--step-sync'], capture_output=True, text=True)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertIn('fused_review', json.loads(good.stdout)['spec'])
+        bad = subprocess.run(base+['--step-sync','--early-review-threshold','.65'], capture_output=True)
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_early_review_is_explicit_and_does_not_use_stop_or_itm_threshold(self):
+        command = evaluation_command('hm3dv2', 1, Path('/tmp/early'), True,
+            method='selected_review', review_profile='linked_early', step_sync=True,
+            review_backend='qwen', early_review_threshold=.8)
+        self.assertIn('+active_view.early_review_threshold=0.8', command)
+        self.assertIn('+active_view.early_review=true', command)
+        self.assertIn('active_view.stop_review=false', command)
+        self.assertIn('active_view.linked_evidence=true', command)
+        self.assertIn('active_view.itm_confirm_threshold=0.65', command)
+        old = evaluation_command('hm3dv2', 1, Path('/tmp/old'), True,
+            method='selected_review', review_profile='linked_stop_preserve', early_review_threshold=.8)
+        self.assertFalse(any('early_review' in x for x in old))
+
+    def test_early_cli_rejects_invalid_threshold_and_missing_step_sync(self):
+        base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
+              '--method','selected_review','--review-profile','linked_early']
+        for extra in ([],['--step-sync','--early-review-threshold','nan'],
+                      ['--step-sync','--early-review-threshold','1.1']):
+            result=subprocess.run(base+extra,capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+        good=subprocess.run(base+['--step-sync'],capture_output=True,text=True,check=True)
+        self.assertEqual(json.loads(good.stdout)['spec']['early_review']['detector_threshold'],.65)
+
     def test_dirty_source_requires_complete_explicit_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -128,6 +179,7 @@ class BatchTest(unittest.TestCase):
                 clean = source_provenance()
                 (root / 'runtime.py').write_text('version = 2\n')
                 (root / 'new.py').write_text('new = True\n')
+                (root / 'Apply.srv').write_text('int32 step\n---\nbool accepted\n')
                 (root / 'Evidence.msg').write_text('uint64 episode_token\n')
                 (root / 'CMakeLists.txt').write_text('project(test_fixture)\n')
                 (root / 'secret.env').write_text('TEST_SECRET=not-a-real-secret\n')
@@ -139,7 +191,7 @@ class BatchTest(unittest.TestCase):
                 self.assertTrue(saved['uncommitted'])
                 with tarfile.open(root / saved['source_archive']) as archive:
                     self.assertEqual(set(archive.getnames()),
-                                     {'runtime.py', 'new.py', 'Evidence.msg', 'CMakeLists.txt'})
+                                     {'runtime.py', 'new.py', 'Evidence.msg', 'Apply.srv', 'CMakeLists.txt'})
                     self.assertEqual(archive.extractfile('runtime.py').read(), b'version = 2\n')
                 again = source_provenance(root / 'outputs/again')
                 self.assertEqual(saved['source_sha256'], again['source_sha256'])
@@ -231,6 +283,72 @@ class BatchTest(unittest.TestCase):
                 self.assertEqual(reader.get_data(0).shape[1], 960)
             self.assertFalse(video.temporary.exists())
             self.assertFalse(any(isinstance(v, list) for v in vars(video).values()))
+
+    def test_failure_video_policy_discards_success_without_buffering(self):
+        import imageio.v2 as imageio
+        import numpy as np
+        command = evaluation_command('hm3dv2', 1000, Path('/tmp/run'), True, failure_videos=True)
+        self.assertIn('+video_policy=failures', command)
+        with tempfile.TemporaryDirectory() as directory:
+            for number, success in ((1, True), (2, False)):
+                video = EpisodeVideo(directory, number)
+                for value in (0, 100, 200):
+                    video.append(np.full((64, 64, 3), value, dtype=np.uint8))
+                if success:
+                    video.discard()
+                else:
+                    path = video.finish(Path(directory) / 'failure', 'episode2')
+                    with imageio.get_reader(path) as reader:
+                        self.assertEqual(reader.count_frames(), 3)
+                self.assertFalse(video.temporary.exists())
+            self.assertEqual(len(list(Path(directory).rglob('*.mp4'))), 1)
+
+    def test_extension_rejects_algorithm_seed_and_step_changes(self):
+        old = {'episodes': 50, 'video': True, 'method': 'selected_review', 'seed': 100}
+        new = {**old, 'episodes': 1000, 'video_policy': 'failures'}
+        validate_resume_spec(old, new, True)
+        for invalid in (dict(new, seed=101), dict(new, method='baseline'), dict(new, episodes=49)):
+            with self.assertRaises(RuntimeError):
+                validate_resume_spec(old, invalid, True)
+        with self.assertRaises(RuntimeError):
+            validate_resume_spec(old, new)
+        config = 'max_episodes: 50\nneed_video: true\nhabitat:\n  max_steps: 500\n'
+        extended = config.replace('50\n', '1000\n', 1) + 'video_policy: failures\n'
+        validate_resume_config(config, extended, True)
+        with self.assertRaises(RuntimeError):
+            validate_resume_config(config, extended.replace('500', '3'), True)
+
+    def test_extension_resume_uses_latest_contract_preserves_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = {'episodes': 50, 'video': True}
+            (root / 'experiment.json').write_text(json.dumps(original))
+            (root / 'config.yaml').write_text('max_episodes: 50\n')
+            (root / 'provenance.json').write_text(json.dumps({'source_sha256': 'old'}))
+            (root / 'resume-provenance').mkdir()
+            extended = dict(original, episodes=1000, video_policy='failures')
+            (root / 'resume-provenance/attempt-1.json').write_text(json.dumps({
+                'current': {'source_sha256': 'new'}, 'experiment': extended,
+                'resolved_config_yaml': 'max_episodes: 1000\nvideo_policy: failures\n'}))
+            (root / 'resume-provenance/attempt-2.json').write_text(json.dumps({
+                'current': {'source_sha256': 'new'}}))
+            spec, config, provenance = resume_contract(root)
+            self.assertEqual(spec, extended)
+            validate_resume_spec(spec, extended)
+            self.assertEqual(provenance['source_sha256'], 'new')
+            self.assertEqual(json.loads((root / 'experiment.json').read_text()), original)
+            self.assertEqual((root / 'config.yaml').read_text(), 'max_episodes: 50\n')
+
+    def test_frozen_full_plan_rejects_wrong_unseen_episode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'planned-episodes.json').write_text(json.dumps([
+                {'scene_id': 'a', 'episode_id': '0', 'target': 'chair'},
+                {'scene_id': 'b', 'episode_id': '1', 'target': 'bed'}]))
+            record_episode_identity(root, 1, 'a', '0', 'chair')
+            with self.assertRaises(ValueError):
+                record_episode_identity(root, 2, 'a', '1', 'bed')
+            record_episode_identity(root, 2, 'b', '1', 'bed')
 
 
 if __name__ == "__main__":

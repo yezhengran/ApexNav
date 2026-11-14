@@ -17,7 +17,11 @@ def generate_launch_description():
     # Get package share directory
     exploration_manager_share = get_package_share_directory('exploration_manager')
 
+    step_sync_arg = DeclareLaunchArgument('step_sync', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
+    review_automatic_arg = DeclareLaunchArgument('review_automatic', default_value='false')
+    review_fused_arg = DeclareLaunchArgument('review_fused', default_value='false')
+    review_confidence_arg = DeclareLaunchArgument('review_confidence', default_value='false')
     review_late_step_arg = DeclareLaunchArgument('review_late_step', default_value='350')
     review_lineage_arg = DeclareLaunchArgument('review_lineage', default_value='false')
     review_stop_arg = DeclareLaunchArgument('review_stop', default_value='false')
@@ -78,7 +82,11 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'is_real_world_': LaunchConfiguration('is_real_world'),
+            'step_sync_': LaunchConfiguration('step_sync'),
             'review_enabled_': LaunchConfiguration('review_enabled'),
+            'review_automatic_': LaunchConfiguration('review_automatic'),
+                'review_fused_': LaunchConfiguration('review_fused'),
+                'review_confidence_': LaunchConfiguration('review_confidence'),
             'review_late_step_': LaunchConfiguration('review_late_step'),
             'review_lineage_': LaunchConfiguration('review_lineage'),
             'review_stop_': LaunchConfiguration('review_stop'),
@@ -100,7 +108,11 @@ def generate_launch_description():
         map_size_x_arg,
         map_size_y_arg,
         is_real_world_arg,
+        step_sync_arg,
         review_enabled_arg,
+        review_automatic_arg,
+        review_fused_arg,
+        review_confidence_arg,
         review_late_step_arg,
         review_lineage_arg,
         review_stop_arg,
