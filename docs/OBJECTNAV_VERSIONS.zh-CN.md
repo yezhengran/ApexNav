@@ -49,7 +49,6 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | **`Q4-fail30`** | Q4，Q2-full1000 的失败按全局编号取前 30 | **暂停：完成 16/30，恢复成功 2/16**；不是完整集成功率 | `outputs/runs/qwen-fused-fail30-20261114-offline/`；有效记录在 `experiment_notes/qwen-fused-fail30-20261114/init-offline/` |
 | `Q4-tvplant4` | Q4，预选 111盆栽、122电视、174盆栽、237电视 | 0/4 完成；内存不足停止。首尝试 111 未完成、后一次导航前预检停止；均无 Qwen 调用 | `outputs/runs/qwen-fused-tv-plant-demo-20261114/` 和 `outputs/runs/qwen-fused-tv-plant-demo-20261114-after-cleanup/` |
 | `Q4-demo2` | Q4，chair/tv/potted plant目的性小池 | 完成4例后停止；英文选例10 chair（1复核、0主动观测）与885 tv（5复核、6动作、4平移、导航成功但回答均不确定）；不推断总体SR | `outputs/runs/q4-two-demos-20261114-25g/`，观看版`presentation-en/`；见[记录](experiments/2026-11-14-q4-two-demos.zh-CN.md) |
-
 | `Q5-demo2` | Q5，固定重跑第 10 chair 与 885 tv | 2/2 成功，197/77 步；2/3 次复核，20/39 观测动作；均在 400 步前结束，加权排序仅离线验证 | `outputs/runs/qwen-facing-confidence-20261114/`；见[记录](experiments/2026-11-14-qwen-facing-confidence.zh-CN.md) |
 
 `Q4-fail30` 是旧失败子集，`Q3-first30` 是顺序前 30，不能直接比较两者百分比。Q1 前 50 对照曾在首次复查前出现轨迹分歧；它不是固定轨迹下只替换 VLM 的因果消融。Q2-full1000 也不能与 B0-paired50 直接作全量公平对照。
@@ -65,7 +64,6 @@ B0 的“原生”指基线算法行为，并不表示当前 ROS2 适配分支�
 | Q2 | `review-evidence-fix` 分支仍在基底 `6829be9`；全量实现尚未提交 | 170 文件：`295b50a412301920968057b7dc731f1c38bcb593999bf2083277c7ebcdcfe96e` |
 | Q3 | `early-vlm-review` 本地分支仍在基底 `6829be9`；实现尚未提交、分支尚未发布 | 172 文件：`5b561ad7d77359bf01fe40915e2be24add842d61616b8e195949a635edb5ab7b` |
 | Q4 | `fused-vlm-active-observation` 的 `a7718ad` 为方案文档；本次登记也是文档改动，运行实现尚未提交 | 174 文件：`57c9b71c4a7424c648fbcbca93e677a7860b044e16a00d670ec3e0567e8651f2` |
-
 | Q5 | 本次新分支提交完整可选实现（包含此前 Q2–Q4 未提交的必要运行基础）；旧分支和旧 provenance 不改写 | 179 文件：`8b7c78660f4efd79162dfb858c0f4a219e972412c5dc14680bcee509e5b8948e`；独立 facing-confidence overlay |
 
 每组的 `provenance.json`、`source-snapshot/runtime-source.tar.gz`、`source-snapshot/files.json` 或 `resume-provenance/` 保存运行来源。复现还需该组 config、episode 清单、安装二进制／overlay 与模型权重指纹；单独 checkout 目前的 Q2/Q3/Q4 分支不等于恢复对应实验实现。后续完成各自归档时，应从精确快照提交并更新此表，不能把当前 Q4 工作区一起提交为 Q2 或 Q3。
