@@ -471,6 +471,9 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if getattr(view_cfg, 'framing_review', False):
                 from vlm.framing_review import FramingTargetReviewer
                 reviewer_class = FramingTargetReviewer
+            if getattr(view_cfg, 'annular_review', False):
+                from vlm.annular_review import AnnularTargetReviewer
+                reviewer_class = AnnularTargetReviewer
             view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
                 label.split("|")[0].strip(), review_verifier or itmclient.itm_score,

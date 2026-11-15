@@ -40,6 +40,13 @@ def eligible_failure(output, ledger, evaluation_started):
     crop = Path(error['crop']).resolve()
     if not crop.is_relative_to(attempt.resolve()) or digest(crop) != bill['image_sha256']:
         raise RuntimeError('Network error image does not match the unfinished episode')
+    if 'image_sha256s' in bill or len(error.get('crops', [])) > 1:
+        crops = [Path(p).resolve() for p in error.get('crops', [])]
+        hashes = bill.get('image_sha256s', [])
+        if (not 1 <= len(crops) <= 5 or len(crops) != bill.get('image_count') or
+                crops[0] != crop or not all(p.is_relative_to(attempt.resolve()) for p in crops) or
+                [digest(p) for p in crops] != hashes):
+            raise RuntimeError('Network error multi-image evidence does not match the ledger')
     return {'episode': number, 'attempt': str(attempt), 'call_id': error['call_id'],
             'transport': diagnostic, 'events_sha256': digest(attempt / 'events.jsonl')}
 

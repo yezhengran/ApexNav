@@ -24,6 +24,7 @@
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <exploration_manager/active_view.h>
+#include <exploration_manager/frontier_view.h>
 #include <plan_env/msg/review_evidence.hpp>
 #include <plan_env/msg/scored_review_result.hpp>
 #include <plan_env/srv/apply_observation.hpp>
@@ -107,13 +108,9 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr inspection_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
+  FrontierView frontier_view_;
+  bool frontier_look_ = false;
   bool step_sync_ = false;
-  bool stable_navigation_ = false, regional_navigation_ = false, late_navigation_ = false;
-  int regional_scan_until_ = -1;
-  bool recovery_active_ = false, recovery_has_goal_ = false;
-  int recovery_started_ = 0;
-  Vector2d recovery_goal_ = Vector2d::Zero();
-  bool monitoredRecovery(const Vector2d& current, const Vector2d& previous);
   ObservationSequence observation_sequence_;
   rclcpp::Service<plan_env::srv::ApplyObservation>::SharedPtr observation_service_;
   bool review_enabled_ = false, review_replan_ = false, review_lineage_ = false;
@@ -121,6 +118,7 @@ private:
   bool review_stop_ = false, review_preserve_stop_ = false;
   bool review_automatic_ = false, review_pending_automatic_ = false;
   bool review_confidence_ = false;
+  bool review_annular_ = false;
   bool review_fused_ = false, review_pending_inspection_ = false;
   std::set<int> inspection_candidates_;
   int inspection_suppressed_at_ = -1;
@@ -150,6 +148,7 @@ private:
   /* Action Planner */
   int callActionPlanner();
   int planInspection();
+  bool maybeLookAtFrontier(const Vector2d& position, double yaw, bool arrived);
   bool maybeReviewSelected(int exploration_result);
   bool maybeReviewAutomatic();
   bool maybeReviewStop();

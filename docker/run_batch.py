@@ -43,7 +43,7 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
                        uncertain_after_steps=350, episode_index=-1, review_profile="legacy",
                        review_backend="blip2", qwen_budget_ledger="", failure_videos=False, step_sync=False,
-                       early_review_threshold=0.65, navigation_profile="legacy"):
+                       early_review_threshold=0.65):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         f"test_epi_num={episode_index}", f"+max_episodes={episodes}",
@@ -53,8 +53,6 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
     ]
     if step_sync:
         command.append("+navigation_step_sync=true")
-    if navigation_profile != 'legacy':
-        command.append(f'+navigation_profile={navigation_profile}')
     if method != "baseline":
         command.extend([f"active_view.mode={method}",
                         f"active_view.itm_confirm_threshold={confirm_threshold}",
@@ -63,18 +61,20 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_profile != "legacy":
             command.extend(["active_view.recent_evidence=true",
                             f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
-        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing"):
+        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular"):
             prefix = '+' if dataset != 'hm3dv2' else ''
             command.extend([f"{prefix}active_view.linked_evidence=true",
                             f"{prefix}active_view.stop_review={str(review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}"])
-        if review_profile in ('linked_fused', 'linked_confidence', 'linked_framing'):
+        if review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular'):
             command.append('+active_view.fused_review=true')
-        if review_profile in ('linked_confidence', 'linked_framing'):
+        if review_profile in ('linked_confidence', 'linked_framing', 'linked_annular'):
             command.append('+active_view.confidence_review=true')
         if review_profile == 'linked_framing':
             command.append('+active_view.framing_review=true')
             if review_backend == 'qwen':
                 command.append('+active_view.qwen_plant_confirm_threshold=0.6')
+        if review_profile == 'linked_annular':
+            command.extend(['+active_view.framing_review=true', '+active_view.annular_review=true'])
         if review_profile == 'linked_early':
             command.extend(['+active_view.early_review=true',
                             f'+active_view.early_review_threshold={early_review_threshold}'])
@@ -224,13 +224,12 @@ def main():
     parser.add_argument("--episode-index", type=int, default=-1,
                         help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
-    parser.add_argument('--navigation-profile', choices=['legacy', 'stable', 'regional', 'regional_late'], default='legacy',
-                        help='Opt-in staged navigation; never changes legacy profiles')
+    parser.add_argument("--frontier-look", action="store_true", help="Independent bounded arrival-facing ablation; default off")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing"],
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument('--early-review-threshold', type=float, default=None,
                         help='linked_early only: single-frame target detector score, default 0.65')
@@ -241,8 +240,6 @@ def main():
     parser.add_argument("--reject-threshold", type=float, default=0.20)
     parser.add_argument("--uncertain-after-steps", type=int, default=350)
     args = parser.parse_args()
-    if args.navigation_profile != 'legacy' and (not args.step_sync or args.review_profile != 'linked_framing'):
-        parser.error('Stable navigation requires step-sync / linked_framing')
     if args.network_episode_retries and args.review_backend != 'qwen':
         parser.error('--network-episode-retries requires Qwen')
     if args.failure_videos:
@@ -265,9 +262,9 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
-    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') and not args.step_sync:
+    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') and not args.step_sync:
         parser.error('linked_fused requires --step-sync')
-    if args.review_profile in ('linked_confidence', 'linked_framing') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
+    if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
         parser.error('linked_confidence requires Qwen and --uncertain-after-steps 400')
     if args.review_profile == 'linked_early':
         if not args.step_sync:
@@ -279,7 +276,7 @@ def main():
     elif args.early_review_threshold is not None:
         parser.error('--early-review-threshold requires linked_early')
     if args.review_backend == 'qwen':
-        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing'):
+        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular'):
             parser.error('Qwen requires selected_review / linked_stop_preserve, linked_early or linked_fused')
         ledger = (ROOT / args.qwen_budget_ledger).resolve()
         if not args.qwen_budget_ledger or not ledger.is_file() or not ledger.is_relative_to(ROOT):
@@ -299,7 +296,7 @@ def main():
                                  args.reject_threshold, args.uncertain_after_steps,
                                  args.episode_index, args.review_profile,
                                  args.review_backend, args.qwen_budget_ledger, args.failure_videos, args.step_sync,
-                                 args.early_review_threshold, args.navigation_profile)
+                                 args.early_review_threshold)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -345,23 +342,26 @@ def main():
                 'comparison': '>=', 'overrides_raw_decision_and_quality': True,
                 'below_threshold': 'never_confirm; preserve_existing_rejection_rules',
                 'other_targets': 'unchanged_structured_decision_and_quality'}
-    if args.navigation_profile != 'legacy':
-        spec['navigation_profile'] = args.navigation_profile
-        spec['navigation_policy'] = {'target_margin': .08, 'minimum_commit_steps': 24,
-            'progress_window': 24, 'candidate_cooldown_steps': 60,
-            'failed_edge_steps': 40, 'recovery_actions': 16, 'max_recoveries': 4}
-    if args.navigation_profile in ('regional', 'regional_late'):
-        spec['regional_policy']={'region_m':2.5,'commit_steps':32,'switch_margin':.20,'reconsider_steps':8,
-            'local_boundary_search_m':4.,'failed_site_cooldown':80,'max_horizontal_scans':2,'scan_steps':12,
-            'known_free_routes_only':True,'unknown_gain_weight':1.5,'semantic_weight':.8}
-    if args.navigation_profile == 'regional_late':
-        spec['navigation_policy']['minimum_commit_steps'] = 0
-        spec['late_approach_policy'] = {'start_step':400,'score_mutation':False,
-            'confirmed_first':True,'require_target_observations':True,'reject_excluded':True,
-            'minimum_commit_steps':0,'switch_margin':.08,'goal_scoped_progress':True,
-            'goal_shift_reset_m':.75,'window_actions':24,'arrival_and_collision':'unchanged'}
     if args.step_sync:
         spec["navigation_step_sync"] = True
+    if args.frontier_look:
+        spec['frontier_look'] = {'policy': 'visible_unknown_boundary_gain_per_turn',
+            'max_turns': 3, 'arrival_m': .5, 'rescan_separation_m': .75,
+            'base_frontier_generation_and_routes': 'unchanged'}
+    if args.review_profile == 'linked_annular':
+        spec['annular_review'] = {
+            'candidate_memory': 'strict_top5_detector_score_per_mapper_id',
+            'first_call': 'single_best_crop_at_original_fusion_threshold',
+            'inspection_trigger': 'uncertain_or_insufficient_and_no_reachable_confirmed_alternative',
+            'clear_adequate_rejection': 'exclude', 'path': 'reachable_free_framing_band_short_arc',
+            'arc_degrees': 30, 'sample_interval_degrees': 15, 'max_calls_per_candidate': 2,
+            'inspection_deadline_step': 400, 'inspection_max_actions': 48,
+            'second_call': 'joint_current_top5_after_route_and_center_facing',
+            'new_view_required_in_top5': False, 'pre400_approach_hold': False,
+            'late_order': 'confirmed_then_latest_qwen_descending_then_unscored_fusion',
+            'plant_policy': 'adequate_nonrejected_and_target_confidence_gte_0.60',
+            'other_targets': 'structured_decision_with_adequate_quality',
+            'baseline_navigation': 'pre_Q7_legacy', 'pitch_actions': False}
     if args.failure_videos:
         spec["video_policy"] = "failures"
     if args.dry_run:
@@ -460,16 +460,15 @@ def main():
                             ["ros2", "launch", "exploration_manager", "exploration.launch.py",
                              f"review_enabled:={str(args.method == 'selected_review').lower()}",
                              f"review_late_step:={args.uncertain_after_steps}",
-                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing')).lower()}",
+                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular')).lower()}",
                              f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
-                             *(['navigation_stable:=true'] if args.navigation_profile != 'legacy' else []),
-                             *(['navigation_regional:=true'] if args.navigation_profile in ('regional', 'regional_late') else []),
-                             *(['navigation_late:=true'] if args.navigation_profile == 'regional_late' else []),
-                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing') else []),
-                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') else []),
-                             *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing') else [])],
+                             *(['frontier_look:=true'] if args.frontier_look else []),
+                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') else []),
+                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') else []),
+                             *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular') else []),
+                             *(['review_annular:=true'] if args.review_profile == 'linked_annular' else [])],
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                         )
                     time.sleep(3)

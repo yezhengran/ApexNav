@@ -22,4 +22,11 @@ int main() {
   assert(!validReviewReceipt(false,4,5,42,42,10,10,2,.5));
   assert(!validReviewReceipt(true,4,5,42,42,10,10,0,.5));
   assert(!validReviewReceipt(true,4,5,42,42,10,10,2,1.1));
+  using apexnav_planner::annularCandidateBefore;
+  assert(annularCandidateBefore(0,.1,2,true,.9,1,.9,2,true,.1,true));
+  assert(!annularCandidateBefore(0,.1,2,true,.9,1,.9,2,true,.1,false));
+  assert(annularCandidateBefore(0,.1,2,true,0.,1,1.,0,false,0.,true));
+  assert(annularCandidateBefore(0,.1,1,true,.6,1,.9,2,true,.9,true));
+  assert(annularCandidateBefore(0,.1,2,true,.6,1,.9,2,true,.6,true));
+  // Ordering changes no stored fusion or Qwen values and does not confirm uncertainty.
 }

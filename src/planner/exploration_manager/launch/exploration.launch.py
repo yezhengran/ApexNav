@@ -17,14 +17,13 @@ def generate_launch_description():
     # Get package share directory
     exploration_manager_share = get_package_share_directory('exploration_manager')
 
-    navigation_stable_arg = DeclareLaunchArgument('navigation_stable', default_value='false')
-    navigation_regional_arg = DeclareLaunchArgument('navigation_regional', default_value='false')
-    navigation_late_arg = DeclareLaunchArgument('navigation_late', default_value='false')
     step_sync_arg = DeclareLaunchArgument('step_sync', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
     review_automatic_arg = DeclareLaunchArgument('review_automatic', default_value='false')
     review_fused_arg = DeclareLaunchArgument('review_fused', default_value='false')
     review_confidence_arg = DeclareLaunchArgument('review_confidence', default_value='false')
+    review_annular_arg = DeclareLaunchArgument('review_annular', default_value='false')
+    frontier_look_arg = DeclareLaunchArgument('frontier_look', default_value='false')
     review_late_step_arg = DeclareLaunchArgument('review_late_step', default_value='350')
     review_lineage_arg = DeclareLaunchArgument('review_lineage', default_value='false')
     review_stop_arg = DeclareLaunchArgument('review_stop', default_value='false')
@@ -85,14 +84,13 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'is_real_world_': LaunchConfiguration('is_real_world'),
-            'navigation_stable_': LaunchConfiguration('navigation_stable'),
-            'navigation_regional_': LaunchConfiguration('navigation_regional'),
-            'navigation_late_': LaunchConfiguration('navigation_late'),
             'step_sync_': LaunchConfiguration('step_sync'),
             'review_enabled_': LaunchConfiguration('review_enabled'),
             'review_automatic_': LaunchConfiguration('review_automatic'),
                 'review_fused_': LaunchConfiguration('review_fused'),
                 'review_confidence_': LaunchConfiguration('review_confidence'),
+                'review_annular_': LaunchConfiguration('review_annular'),
+                'frontier_look_': LaunchConfiguration('frontier_look'),
             'review_late_step_': LaunchConfiguration('review_late_step'),
             'review_lineage_': LaunchConfiguration('review_lineage'),
             'review_stop_': LaunchConfiguration('review_stop'),
@@ -114,14 +112,13 @@ def generate_launch_description():
         map_size_x_arg,
         map_size_y_arg,
         is_real_world_arg,
-        navigation_stable_arg,
-        navigation_regional_arg,
-        navigation_late_arg,
         step_sync_arg,
         review_enabled_arg,
         review_automatic_arg,
         review_fused_arg,
         review_confidence_arg,
+        review_annular_arg,
+        frontier_look_arg,
         review_late_step_arg,
         review_lineage_arg,
         review_stop_arg,

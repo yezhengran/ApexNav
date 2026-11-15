@@ -142,6 +142,28 @@ class BatchTest(unittest.TestCase):
         bad = subprocess.run(base+['--step-sync','--early-review-threshold','.65'], capture_output=True)
         self.assertNotEqual(bad.returncode, 0)
 
+    def test_annular_profile_and_frontier_ablation_are_explicit(self):
+        temporary=tempfile.TemporaryDirectory(prefix='annular-test-',dir=ROOT/'outputs')
+        self.addCleanup(temporary.cleanup)
+        ledger=Path(temporary.name)/'budget.json'
+        ledger.write_text(json.dumps(dict(limit_cny=20,initial_spent_cny=0,calls={})))
+        base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
+              '--method','selected_review','--review-profile','linked_annular',
+              '--review-backend','qwen','--uncertain-after-steps','400','--qwen-budget-ledger',str(ledger)]
+        self.assertNotEqual(subprocess.run(base,capture_output=True).returncode,0)
+        result=subprocess.run(base+['--step-sync'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        value=json.loads(result.stdout)
+        self.assertIn('+active_view.annular_review=true',value['command'])
+        self.assertNotIn('frontier_look',value['spec'])
+        self.assertFalse(any('qwen_plant_confirm_threshold' in x for x in value['command']))
+        self.assertEqual(value['spec']['annular_review']['new_view_required_in_top5'],False)
+        extra=subprocess.run(base+['--step-sync','--frontier-look'],capture_output=True,text=True)
+        self.assertEqual(extra.returncode,0,extra.stderr)
+        enabled=json.loads(extra.stdout)
+        self.assertEqual(enabled['command'],value['command'])
+        self.assertEqual(enabled['spec']['frontier_look']['max_turns'],3)
+
     def test_early_review_is_explicit_and_does_not_use_stop_or_itm_threshold(self):
         command = evaluation_command('hm3dv2', 1, Path('/tmp/early'), True,
             method='selected_review', review_profile='linked_early', step_sync=True,

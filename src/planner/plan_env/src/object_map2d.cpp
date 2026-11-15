@@ -571,9 +571,22 @@ void ObjectMap2D::getAllConfidenceObjectClouds(
 
 double ObjectMap2D::navigationRank(const ObjectCluster& object) const {
   const auto q = qwen_confidences_.find(object.id_);
+  if (annularLate() && q != qwen_confidences_.end()) return q->second;
+  if (annular_review_) return object.confidence_scores_[0];
   return reviewRank(object.confidence_scores_[0], confidence_review_, review_late_eligible_,
       reviewState(object.id_), q != qwen_confidences_.end(),
       q != qwen_confidences_.end() ? q->second : 0.0);
+}
+
+bool ObjectMap2D::candidateBefore(const ObjectCluster& a, const ObjectCluster& b) const {
+  if (annular_review_) {
+    const auto aq=qwen_confidences_.find(a.id_), bq=qwen_confidences_.find(b.id_);
+    return annularCandidateBefore(a.id_,a.confidence_scores_[0],reviewState(a.id_),
+        aq!=qwen_confidences_.end(),aq!=qwen_confidences_.end()?aq->second:0.,
+        b.id_,b.confidence_scores_[0],reviewState(b.id_),
+        bq!=qwen_confidences_.end(),bq!=qwen_confidences_.end()?bq->second:0.,annularLate());
+  }
+  return navigationRank(a) > navigationRank(b);
 }
 
 void ObjectMap2D::logCandidateScores(uint32_t step) const {
@@ -606,7 +619,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
     // Sort by confidence score in descending order
     std::sort(
         top_objects.begin(), top_objects.end(), [this](const ObjectCluster& a, const ObjectCluster& b) {
-          return navigationRank(a) > navigationRank(b);
+          return candidateBefore(a, b);
         });
 
     // Extract point clouds for top-ranked objects
@@ -667,7 +680,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
 
       // Include only high-confidence objects with primary label (0)
       const int review = reviewState(object.id_);
-      const bool waiting = (fused_review_gating_ && !review_late_eligible_ && review != CONFIRMED) ||
+      const bool waiting = (fused_review_gating_ && !annular_review_ && !review_late_eligible_ && review != CONFIRMED) ||
           (stop_review_gating_ && !review_late_eligible_ &&
           !review_stop_preserved_.count(object.id_) &&
           (review == UNCERTAIN || review == PENDING_EVIDENCE));
@@ -688,7 +701,7 @@ void ObjectMap2D::getTopConfidenceObjectCloud(
             const bool bc = reviewState(b.id_) == CONFIRMED && reviewEligible(b.id_, false);
             if (ac != bc) return ac;
           }
-          return navigationRank(a) > navigationRank(b);
+          return candidateBefore(a, b);
         });
 
     // Extract point clouds from filtered objects
@@ -753,16 +766,6 @@ bool ObjectMap2D::reviewEligible(int object_id, bool require_confidence) const
   return best_label == 0 && !object.good_cells_.empty() &&
       object.observation_nums_[0] >= min_observation_num_ &&
       (!require_confidence || object.confidence_scores_[0] >= min_confidence_);
-}
-
-bool ObjectMap2D::lateApproachEligible(int object_id) const
-{
-  if (object_id < 0 || object_id >= static_cast<int>(objects_.size()) ||
-      reviewState(object_id) == REJECTED) return false;
-  const auto& object = objects_[object_id];
-  // Late approach is a navigation hypothesis, never a semantic confirmation.
-  return !object.good_cells_.empty() && object.observation_nums_[0] >= min_observation_num_ &&
-      std::isfinite(object.confidence_scores_[0]) && object.confidence_scores_[0] > 0.01;
 }
 
 bool ObjectMap2D::isConfidenceObject(const ObjectCluster& obj)

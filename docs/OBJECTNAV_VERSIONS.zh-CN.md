@@ -1,21 +1,10 @@
 # ObjectNav 实验版本与数据名称
 
-<!-- Q7_VERSIONS_START -->
-**2026-11-15当前诊断修订Q7-B2（regional_late）已停止。** 数据简称`Q7-B2-fail6`：Q2成功、原B失败的356/367/379/386/389/395，4/6恢复（379/386/389/395），同六例B0/6、Q2为6/6。运行`0b72fae`、188源`db097bdf…`，仍在`codex/objectnav-hierarchical-recovery`；目标相关进展窗口、400步候选优先靠近、软排序差，真实置信度不变。389有同图Qwen分数波动，不能将全部恢复视为纯导航收益。旧B-window实际暂停在350–396共47（41成功），397初始化中断不计失败；所有旧/新入口及小时跟进均停止。见[六例报告](experiments/2026-11-15-qwen-regional-late-fail6.zh-CN.md)。下方350–500启动描述保留为历史。
+<!-- Q8_VERSIONS_START -->
+**2026-11-15当前开发版Q8：环带观测＋Top-5联合复查，尚未导航评测。** 分支`codex/objectnav-annular-top5`、开关`linked_annular`，原ApexNav/Q2导航骨架＋Q6图像关联／固定视场几何，未采用Q7导航策略。用户确认严格检测Top-5、质量不足或不确定才补拍、清晰否定排除；第二次联合1–5图，400后最新Qwen分数优先靠近，未评分者融合后备。盆栽adequate且非rejected时>=.60确认。`--frontier-look`为独立默认关闭消融。
 
-2026-11-15用户选定**Q7-B（regional）**作为当前方案，C运行代码已撤回，历史`Q7-C-diag15`只保留证据。恢复提交`41f5084`，运行源与原B一致。新批数据简称**Q7-B-window350-500**：151身份新跑，仅失败视频，控制`experiment_notes/qwen-regional-350-500-20261115/`，输出`outputs/runs/qwen-regional-350-500-20261115/`；不混入diag15。Q2完整151对照，Q6-plant060共同126对照，缺失25另列。[协议](experiments/2026-11-15-qwen-regional-350-500.zh-CN.md)。 第367完整失败在独立终止STOP边界审计通过后只纳入一次；实时控制已切至`experiment_notes/qwen-regional-350-500-20261115/continue-0368-20261115/`，从368继续，原控制failed/17保留。
-
-**2026-11-15新增Q7阶段登记，以下Q6开发状态属于历史。** 同一新分支`codex/objectnav-hierarchical-recovery`；各阶段按运行提交/源码指纹区分，不能仅以最终分支HEAD替代历史版本。
-
-| 简称 | 累加机制与运行开关 | 运行提交 | 固定诊断集结果 |
-| --- | --- | --- | --- |
-| Q7-A | 目标/靠近点稳定、进展监控、有界脱困，`--navigation-profile stable` | `e461916` | 旧失败2/12恢复，旧成功3/3保持 |
-| Q7-B | 在A上增加区域访问记忆和可达边界探索，`--navigation-profile regional` | `1d42fcb` | 旧失败7/12恢复，旧成功3/3保持 |
-| Q7-C | 在B上增加多半径可达局部取景与两次重选，`--navigation-profile adaptive` | `683b517` | 旧失败7/12恢复，旧成功2/3保持 |
-
-三组数据简称`Q7-A-diag15`、`Q7-B-diag15`、`Q7-C-diag15`，原始目录分别为`outputs/runs/qwen-hierarchical-{a,b,c}-20261115/`，全部完成并停止。Qwen和plant060判定、原融合阈值、最高历史crop等保持；原Q6结果不替换，不混入Q2或旧1000。仅诊断子集，不能称全量成功率。[逐例结果、源码指纹与局限](experiments/2026-11-15-qwen-hierarchical-recovery.zh-CN.md)。
-C的第54退化存在同图Qwen0.60→0.40的回答变化，0–390步轨迹一致、391步后分叉；不能直接归因于观测点。初步优先B作扩大验证候选，C保留实验开关，不自动开新评测。
-<!-- Q7_VERSIONS_END -->
+Q7-A/B/C/B2及专用实验已按用户要求删除，不再作为在用版本或可恢复实验；Git既有历史不重写、共享账本费用保留。Q2/Q6证据不动。Q8通过98项Python、4组C++、独立构建与真实初始化，暂无SR。见[完整对齐与验证](experiments/2026-11-15-qwen-annular-top5.zh-CN.md)。下方Q6开发描述均为历史。
+<!-- Q8_VERSIONS_END -->
 
 2026-11-14 对齐。此表为今后实验简称的依据；“当前版”“旧版”“提前版”不再单独作为数据标签。分支用于组织开发，**实际实验版本由方法配置、运行源码指纹和固定 episode 集共同确定**。
 
@@ -32,6 +21,7 @@ C的第54退化存在同图Qwen0.60→0.40的回答变化，0–390步轨迹一�
 | **Q4** | **融合提前复查＋主动观测版** | `linked_fused`；原类别融合阈值触发，发送与地图候选绑定的最高单帧分数可用 crop；首次未通过且无其他已确认、可达目标时，规划安全观测点、执行补拍动作并二次复查 | `codex/objectnav-fused-vlm-active-observation` |
 | **Q5** | **朝向后复查＋置信度加权版** | `linked_confidence`；沿用 Q4 融合触发和条件安全观测；二次调用等待到点朝向中心后的真实观测，仍用该对象全历史最高检测分数 crop；Qwen 返回类别置信度，400 步后未确认候选按 0.5 融合＋0.5 Qwen 排序，未调用者保持融合分数 | `codex/objectnav-facing-confidence-review` |
 | **Q6** | **高度视场观测版** | `linked_framing`；在 Q5 上用同候选最佳 mask/depth 的三维可见范围、当前相机高度与固定视场增加安全观测距离；保留最高分 crop 与全部复查/排序规则；无抬头低头 | `codex/objectnav-height-aware-viewpoint` |
+| **Q8** | **环带Top-5联合复查版** | `linked_annular`；严格检测Top-5、自由环带短弧采样、联合Qwen复查、400后Qwen优先靠近；前沿朝向独立默认关闭 | `codex/objectnav-annular-top5` |
 
 **当前开发修订为 Q6-plant060（同 Q6 分支）：仅盆栽按 Qwen 类别分数 ≥0.60 确认；`Q6-plant060-fail6`已独立复跑6个旧盆栽失败，3例恢复成功（50%），已停止。** 原 `Q6-first100` 属于修改前的 Q6，已完成100/100、78成功，已停止，不自动扩展101–1000。见[修订记录](experiments/2026-11-14-qwen-plant060.zh-CN.md)。 两例演示与前100成绩分别保存，旧批次和全量失败归因保持暂停。 Q3 的“单帧 0.65”和 Q4 的“原类别融合阈值”是两种不同触发机制。Q4 仍需要寻找观测点位；额外观测可能是转向、平移，也可能因无安全点位而未执行，须根据真实动作分别统计。
 

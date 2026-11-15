@@ -139,11 +139,12 @@ class FusedTargetReviewer(LinkedTargetReviewer):
                 raise RuntimeError('Planner selected first review without a usable image')
             self.first_steps[ident] = self.step
             self.first_decisions[ident] = decision
-            if decision != self.CONFIRMED:
+            if self._inspection_after_first(decision):
                 self.event('additional_view_pending', candidate=ident, initial_decision=decision)
                 # Provisional navigation state, not a rewritten raw VLM answer.
                 return self._complete(self.UNCERTAIN, 'awaiting_conditional_observation')
-            return self._complete(decision, 'first_view_confirmed')
+            return self._complete(decision, 'first_view_confirmed' if decision == self.CONFIRMED
+                                  else 'first_view_clear_rejection')
         self.inspected.add(ident)
         self.active = self.selected
         self.active.update(self._inspection_geometry(extent), started=self.step,
@@ -156,6 +157,9 @@ class FusedTargetReviewer(LinkedTargetReviewer):
 
     def _inspection_geometry(self, extent):
         return {'radius': observation_radius(extent)}
+
+    def _inspection_after_first(self, decision):
+        return decision != self.CONFIRMED
 
     def _verify(self, phase, evidence=None):
         chosen = evidence if evidence is not None else self._evidence(unused=True)

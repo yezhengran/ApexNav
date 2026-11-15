@@ -20,7 +20,7 @@ import requests
 BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 MODEL = 'qwen3-vl-plus'
 MAX_TOKENS = 192
-# Conservative reservation for one <=256px image and a short prompt. Actual
+# Conservative reservation for up to five <=256px images and a short prompt. Actual
 # token usage is checked against this ceiling; lost responses keep the reserve.
 RESERVE_CNY = 0.02
 RETRY_DELAYS = (2, 5)
@@ -40,6 +40,14 @@ CONFIDENCE_PROMPT = PROMPT.replace(
     'target category, not confidence in your chosen decision label. Use the full range; '
     'do not default to 1 for uncertain or rejected. This is an uncalibrated visual '
     'estimate, independent of navigation distance or success.')
+
+MULTIVIEW_PROMPT = (
+    'The following {count} crops are observations associated by the robot with ONE '
+    'candidate object, ordered by detector confidence. That association can be wrong. '
+    'Assess them jointly; do not count repeated or near-identical views as independent '
+    'evidence. If the images conflict or do not clearly identify the object, say uncertain. '
+    'Return one decision and one target_confidence for the candidate, not one per image. '
+) + CONFIDENCE_PROMPT
 
 
 def read_credentials():
@@ -197,20 +205,31 @@ class QwenReviewer:
             os.replace(temporary, self.ledger)
 
     def __call__(self, rgb, target):
+        return self._request([rgb], target, multiview=False)
+
+    def review_images(self, images, target):
+        if not self.target_confidence or not isinstance(images, (list, tuple)) or not 1 <= len(images) <= 5:
+            raise ValueError('Multi-view confidence review requires 1 to 5 images')
+        return self._request(images, target, multiview=True)
+
+    def _request(self, images, target, multiview):
         if target not in ('chair', 'bed', 'couch', 'tv', 'potted plant', 'toilet'):
             raise ValueError('Unknown ObjectNav target')
-        if rgb.ndim != 3 or rgb.shape[2] != 3 or max(rgb.shape[:2]) > 256:
-            raise ValueError('Qwen expects the unchanged linked-review RGB crop, <=256 pixels')
-        image = io.BytesIO()
-        Image.fromarray(rgb).save(image, format='PNG')
-        png = image.getvalue()
-        prompt = (CONFIDENCE_PROMPT if self.target_confidence else PROMPT).format(target=target)
+        pngs = []
+        for rgb in images:
+            if rgb.ndim != 3 or rgb.shape[2] != 3 or min(rgb.shape[:2]) < 1 or max(rgb.shape[:2]) > 256:
+                raise ValueError('Qwen expects linked RGB crops, each <=256 pixels')
+            image = io.BytesIO()
+            Image.fromarray(rgb).save(image, format='PNG')
+            pngs.append(image.getvalue())
+        template = MULTIVIEW_PROMPT if multiview else (CONFIDENCE_PROMPT if self.target_confidence else PROMPT)
+        prompt = template.format(target=target, count=len(images))
+        content = [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
+                   base64.b64encode(png).decode()}} for png in pngs]
+        content.append({'type': 'text', 'text': prompt})
         payload = {'model': self.model, 'enable_thinking': False, 'temperature': 0,
                    'max_tokens': MAX_TOKENS, 'response_format': {'type': 'json_object'},
-                   'messages': [{'role': 'user', 'content': [
-                       {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
-                                                        base64.b64encode(png).decode()}},
-                       {'type': 'text', 'text': prompt}]}]}
+                   'messages': [{'role': 'user', 'content': content}]}
         request_id, attempt_ids = uuid.uuid4().hex, []
         request_started = time.monotonic()
         for attempt in range(len(RETRY_DELAYS) + 1):
@@ -220,10 +239,14 @@ class QwenReviewer:
             self._update(call_id)
             attempt_ids.append(call_id)
             started = time.monotonic()
-            metadata = {'image_sha256': hashlib.sha256(png).hexdigest(), 'target': target,
+            metadata = {'image_sha256': hashlib.sha256(pngs[0]).hexdigest(), 'target': target,
                         'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
                         'request_id': request_id, 'transport_attempt': attempt + 1,
                         'transport_attempt_ids': list(attempt_ids)}
+            if multiview:
+                metadata.update(image_count=len(pngs),
+                                image_sha256s=[hashlib.sha256(png).hexdigest() for png in pngs],
+                                image_selection='candidate_top5_joint_v1')
             self._update(call_id, metadata)
             response, stage = None, 'transport'
             try:

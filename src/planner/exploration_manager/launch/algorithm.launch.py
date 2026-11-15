@@ -18,14 +18,13 @@ def generate_launch_description():
     trajectory_manager_share = get_package_share_directory('trajectory_manager')
     lkh_mtsp_solver_share = get_package_share_directory('lkh_mtsp_solver')
 
-    navigation_stable_arg = DeclareLaunchArgument('navigation_stable_', default_value='false')
-    navigation_regional_arg = DeclareLaunchArgument('navigation_regional_', default_value='false')
-    navigation_late_arg = DeclareLaunchArgument('navigation_late_', default_value='false')
     step_sync_arg = DeclareLaunchArgument('step_sync_', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled_', default_value='false')
     review_automatic_arg = DeclareLaunchArgument('review_automatic_', default_value='false')
     review_fused_arg = DeclareLaunchArgument('review_fused_', default_value='false')
     review_confidence_arg = DeclareLaunchArgument('review_confidence_', default_value='false')
+    review_annular_arg = DeclareLaunchArgument('review_annular_', default_value='false')
+    frontier_look_arg = DeclareLaunchArgument('frontier_look_', default_value='false')
     review_late_step_arg = DeclareLaunchArgument('review_late_step_', default_value='350')
     review_lineage_arg = DeclareLaunchArgument('review_lineage_', default_value='false')
     review_stop_arg = DeclareLaunchArgument('review_stop_', default_value='false')
@@ -63,14 +62,13 @@ def generate_launch_description():
             {
                 # FSM mode selection
                 'is_real_world': LaunchConfiguration('is_real_world_'),
-                'navigation.stable': LaunchConfiguration('navigation_stable_'),
-                'navigation.regional': LaunchConfiguration('navigation_regional_'),
-                'navigation.late_approach': LaunchConfiguration('navigation_late_'),
                 'navigation.step_sync': LaunchConfiguration('step_sync_'),
                 'review.enabled': LaunchConfiguration('review_enabled_'),
                 'review.automatic': LaunchConfiguration('review_automatic_'),
                 'review.fused': LaunchConfiguration('review_fused_'),
                 'review.confidence': LaunchConfiguration('review_confidence_'),
+                'review.annular': LaunchConfiguration('review_annular_'),
+                'navigation.frontier_look': LaunchConfiguration('frontier_look_'),
                 'review.late_step': LaunchConfiguration('review_late_step_'),
                 'review.lineage': LaunchConfiguration('review_lineage_'),
                 'review.stop_check': LaunchConfiguration('review_stop_'),
@@ -167,14 +165,13 @@ def generate_launch_description():
         fx_arg,
         fy_arg,
         is_real_world_arg,
-        navigation_stable_arg,
-        navigation_regional_arg,
-        navigation_late_arg,
         step_sync_arg,
         review_enabled_arg,
         review_automatic_arg,
         review_fused_arg,
         review_confidence_arg,
+        review_annular_arg,
+        frontier_look_arg,
         review_late_step_arg,
         review_lineage_arg,
         review_stop_arg,

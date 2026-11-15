@@ -15,11 +15,10 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   fp_.reset(new FSMParam);
   fd_.reset(new FSMData);
   active_view_ = ActiveView();
+  frontier_view_ = FrontierView();
   if (first_init) {
     node_->declare_parameter("navigation.step_sync", false);
-    node_->declare_parameter("navigation.stable", false);
-    node_->declare_parameter("navigation.regional", false);
-    node_->declare_parameter("navigation.late_approach", false);
+    node_->declare_parameter("navigation.frontier_look", false);
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
@@ -28,18 +27,11 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
     node_->declare_parameter("review.automatic", false);
     node_->declare_parameter("review.fused", false);
     node_->declare_parameter("review.confidence", false);
+    node_->declare_parameter("review.annular", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("navigation.step_sync", step_sync_);
-  node_->get_parameter("navigation.stable", stable_navigation_);
-  node_->get_parameter("navigation.regional", regional_navigation_);
-  node_->get_parameter("navigation.late_approach", late_navigation_);
-  if(late_navigation_ && !regional_navigation_)throw std::invalid_argument("Late approach requires regional navigation");
-  if(regional_navigation_ && !stable_navigation_)throw std::invalid_argument("Regional navigation requires stable execution");
-  regional_scan_until_=-1;
-  if (stable_navigation_ && !step_sync_)
-    throw std::invalid_argument("Stable navigation requires step-sync");
-  recovery_active_=false;recovery_has_goal_=false;recovery_started_=0;recovery_goal_.setZero();
+  node_->get_parameter("navigation.frontier_look", frontier_look_);
   observation_sequence_.reset();
   node_->get_parameter("review.late_step", review_late_step_);
   node_->get_parameter("review.lineage", review_lineage_);
@@ -48,6 +40,9 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_->get_parameter("review.automatic", review_automatic_);
   node_->get_parameter("review.fused", review_fused_);
   node_->get_parameter("review.confidence", review_confidence_);
+  node_->get_parameter("review.annular", review_annular_);
+  if (review_annular_ && !review_confidence_)
+    throw std::invalid_argument("Annular review requires confidence review");
   if (review_confidence_ && (!review_fused_ || review_late_step_ != 400))
     throw std::invalid_argument("Confidence profile requires fused review and step 400");
   if (review_fused_ && !review_automatic_)
@@ -82,13 +77,10 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   /* Initialize main modules */
   expl_manager_.reset(new ExplorationManager);
   expl_manager_->initialize(node_);
-  expl_manager_->stable_navigation_=stable_navigation_;
-  expl_manager_->regional_navigation_=regional_navigation_;
-  expl_manager_->late_navigation_=late_navigation_;
-  expl_manager_->navigation_.scoped_progress=late_navigation_;
   expl_manager_->object_map2d_->stop_review_gating_ = review_stop_;
   expl_manager_->object_map2d_->fused_review_gating_ = review_fused_;
   expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
+  expl_manager_->object_map2d_->annular_review_ = review_annular_;
   visualization_.reset(new PlanningVisualization(node_));
   fp_->vis_scale_ = expl_manager_->sdf_map_->getResolution() * FSMConstants::VIS_SCALE_FACTOR;
 
@@ -414,12 +406,7 @@ int ExplorationFSM::callActionPlanner()
 
   // Inspection is a bounded detour, never a REACH_OBJECT/STOP condition.
   // With no request the original planner takes exactly the baseline path.
-  expl_manager_->navigation_step_=review_step_;
-  if(regional_navigation_)expl_manager_->regions_.observe(review_step_,current_pos);
-  if (active_view_.id) {
-    if(stable_navigation_) expl_manager_->navigation_.window.clear();
-    return planInspection();
-  }
+  if (active_view_.id) return planInspection();
 
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
@@ -430,24 +417,7 @@ int ExplorationFSM::callActionPlanner()
     return final_res;
   }
 
-  // Keep the native soft-arrival rule; recovery must not preempt a valid arrival.
-  if (stable_navigation_ && fd_->newest_action_==ACTION::MOVE_FORWARD &&
-      (current_pos-last_pos).norm()<stucking_distance &&
-      fd_->final_result_==FINAL_RESULT::SEARCH_OBJECT &&
-      (current_pos-expl_manager_->ed_->next_pos_).norm()<soft_reach_distance) {
-    if (maybeReviewStop()) return FINAL_RESULT::SEARCH_OBJECT;
-    RCLCPP_ERROR(node_->get_logger(), "Reach the object successfully!!!");
-    return FINAL_RESULT::REACH_OBJECT;
-  }
-  if(regional_navigation_ && review_step_<regional_scan_until_) {
-    fd_->newest_action_=ACTION::TURN_LEFT;
-    return FINAL_RESULT::EXPLORE;
-  }
-  if(stable_navigation_ && monitoredRecovery(current_pos,last_pos))
-    return FINAL_RESULT::EXPLORE;
-
   /*******  Escape-from-stuck logic START *******/
-  if (!stable_navigation_) {
   // Detect if robot is stuck and initiate escape sequence
   int last_action = fd_->newest_action_;
   if (!fd_->escape_stucking_flag_ && (current_pos - last_pos).norm() < stucking_distance &&
@@ -533,8 +503,6 @@ int ExplorationFSM::callActionPlanner()
     }
   }
 
-  } // Original escape behavior remains unchanged when disabled.
-
   /*******  Decide whether to replan path (stability heuristic) START *******/
   // Use path stability to reduce oscillation between different frontier targets
   vector<Vector2d> last_next_best_path = expl_manager_->ed_->next_best_path_;
@@ -543,7 +511,7 @@ int ExplorationFSM::callActionPlanner()
     fd_->replan_flag_ = true;
     fd_->dormant_frontier_flag_ = false;
   }
-  else if (!stable_navigation_ && fd_->final_result_ == FINAL_RESULT::EXPLORE && !frontier_change_flag && !review_replan_)
+  else if (fd_->final_result_ == FINAL_RESULT::EXPLORE && !frontier_change_flag && !review_replan_)
     fd_->replan_flag_ = false;
 
   expl_res = expl_manager_->planNextBestPoint(fd_->start_pt_, fd_->start_yaw_(0));
@@ -575,19 +543,22 @@ int ExplorationFSM::callActionPlanner()
     final_res = FINAL_RESULT::SEARCH_OBJECT;
 
   if (final_res == FINAL_RESULT::NO_FRONTIER || expl_manager_->ed_->next_best_path_.empty()) {
-    if(regional_navigation_ && expl_manager_->regions_.scans<2) {
-      ++expl_manager_->regions_.scans;regional_scan_until_=review_step_+12;
-      expl_manager_->navigation_.window.clear();fd_->stucking_action_count_=0;
-      fd_->newest_action_=ACTION::TURN_LEFT;
-      RCLCPP_WARN(node_->get_logger(),"[Region rescan] step=%d attempt=%d",review_step_,expl_manager_->regions_.scans);
-      return FINAL_RESULT::EXPLORE;
-    }
     RCLCPP_WARN(node_->get_logger(), "No (passable) frontier");
     return final_res;
   }
 
   if (review_enabled_ && maybeReviewSelected(expl_res))
     return FINAL_RESULT::SEARCH_OBJECT;
+
+  // An independent, opt-in frontier ablation: object approach always wins.
+  // Check the previous target too, since new observations can retire it before
+  // this replan. At most three actual turns per arrival neighborhood.
+  if (frontier_look_ && final_res == FINAL_RESULT::EXPLORE &&
+      maybeLookAtFrontier(current_pos, current_yaw,
+          (fd_->final_result_ == FINAL_RESULT::EXPLORE &&
+           (current_pos-last_next_pos).norm()<.5) ||
+          (current_pos-expl_manager_->ed_->next_pos_).norm()<.5))
+    return final_res;
 
   Eigen::Vector2d end_pos = expl_manager_->ed_->next_pos_;
   Eigen::Vector2d last_end_pos = fd_->last_next_pos_;
@@ -639,16 +610,11 @@ int ExplorationFSM::callActionPlanner()
     fd_->stucking_action_count_ = 0;
 
   // If stuck for too long globally, terminate episode
-  if (fd_->stucking_action_count_ >= FSMConstants::MAX_STUCKING_COUNT &&
-      (!stable_navigation_ || expl_manager_->navigation_.recovery_count>=4)) {
+  if (fd_->stucking_action_count_ >= FSMConstants::MAX_STUCKING_COUNT) {
     RCLCPP_ERROR(node_->get_logger(), "Stuck for too long, stopping episode.");
     final_res = FINAL_RESULT::STUCKING;
     return final_res;
   }
-
-  // Bind progress to the newly chosen intent before its first real action.
-  if(late_navigation_) expl_manager_->navigation_.beginGoal(
-      final_res==FINAL_RESULT::SEARCH_OBJECT ? expl_manager_->ed_->selected_object_id_ : -2, end_pos);
 
   // Plan specific action based on exploration result
   if (expl_res == EXPL_RESULT::SEARCH_EXTREME)
@@ -659,74 +625,6 @@ int ExplorationFSM::callActionPlanner()
         planNextBestAction(current_pos, current_yaw, expl_manager_->ed_->next_best_path_);
 
   return final_res;
-}
-
-bool ExplorationFSM::monitoredRecovery(const Vector2d& current, const Vector2d& previous)
-{
-  auto& memory=expl_manager_->navigation_;
-  const bool blocked=fd_->newest_action_==ACTION::MOVE_FORWARD &&
-      (current-previous).norm()<0.05;
-  if(blocked && memory.last_step!=review_step_)
-    memory.failEdge(current,Vector2d(std::cos(fd_->start_yaw_(0)),std::sin(fd_->start_yaw_(0))),review_step_);
-  if(late_navigation_) memory.beginGoal(recovery_active_ ? -3 :
-      (fd_->final_result_==FINAL_RESULT::SEARCH_OBJECT ? expl_manager_->ed_->selected_object_id_ : -2),
-      expl_manager_->ed_->next_pos_);
-  const int reason=memory.observe(review_step_,current,expl_manager_->ed_->next_pos_,blocked);
-  auto map=expl_manager_->sdf_map_;
-  auto safe=[map](const Vector2d& p){return map->isInMap(p) &&
-      map->getOccupancy(p)==SDFMap2D::FREE && map->getInflateOccupancy(p)!=1;};
-  auto route=[this,current,safe](const Vector2d& goal,vector<Vector2d>& path){
-    if(!safe(goal)) return false;
-    auto& astar=expl_manager_->path_finder_;astar->reset();
-    if(astar->astarSearch(current,goal,0.1,0.05,Astar2D::SAFETY_MODE::NORMAL)!=Astar2D::REACH_END)
-      return false;
-    path=astar->getPath();
-    return ActiveView::safePath(path,safe);
-  };
-  if(!recovery_active_ && reason && memory.recovery_count<4) {
-    RCLCPP_WARN(node_->get_logger(),"[Navigation recovery] step=%d reason=%s id=%d attempt=%d",
-        review_step_,reason==1?"blocked":"no_progress",memory.selected+1,memory.recovery_count+1);
-    if(fd_->final_result_==FINAL_RESULT::EXPLORE) {
-      expl_manager_->frontier_map2d_->setForceDormantFrontier(expl_manager_->ed_->next_pos_);
-      if(regional_navigation_)expl_manager_->regions_.block(expl_manager_->ed_->next_pos_,review_step_);
-    }
-    memory.abandon(review_step_);++memory.recovery_count;
-    recovery_started_=review_step_;recovery_active_=true;recovery_has_goal_=false;recovery_goal_=current;
-    // First return along a recently traversed, still-known-free route.
-    vector<Vector2d> options;
-    for(auto it=memory.breadcrumbs.rbegin();it!=memory.breadcrumbs.rend();++it)
-      if((*it-current).norm()>=0.75 && (*it-current).norm()<=2.5) options.push_back(*it);
-    for(double radius:{0.75,1.25}) for(int k=0;k<12;++k) {
-      double yaw=fd_->start_yaw_(0)+M_PI+k*M_PI/6.;
-      options.push_back(current+radius*Vector2d(std::cos(yaw),std::sin(yaw)));
-    }
-    vector<Vector2d> path;
-    for(const auto& goal:options) if(route(goal,path)) {recovery_goal_=goal;recovery_has_goal_=true;break;}
-    fd_->stucking_action_count_=0;fd_->replan_flag_=true;
-  }
-  if(!recovery_active_) return false;
-  if(review_step_-recovery_started_>=16 ||
-      (recovery_has_goal_ && (current-recovery_goal_).norm()<0.3)) {
-    recovery_active_=false;memory.window.clear();fd_->stucking_action_count_=0;
-    RCLCPP_INFO(node_->get_logger(),"[Navigation recovery end] step=%d",review_step_);
-    return false;
-  }
-  vector<Vector2d> path;
-  if((current-recovery_goal_).norm()>=0.3 && route(recovery_goal_,path)) {
-    expl_manager_->ed_->next_best_path_=path;expl_manager_->ed_->next_pos_=recovery_goal_;
-    fd_->newest_action_=planNextBestAction(current,fd_->start_yaw_(0),path);
-    if(fd_->newest_action_==ACTION::MOVE_FORWARD) {
-      const Vector2d move=.25*Vector2d(std::cos(fd_->start_yaw_(0)),std::sin(fd_->start_yaw_(0)));
-      if(!ActiveView::safePath({current,current+move},safe) || memory.blockedEdge(current,move,review_step_))
-        fd_->newest_action_=ACTION::TURN_LEFT;
-    }
-  } else {
-    // A bounded horizontal scan refreshes geometry; no invented free cells.
-    fd_->newest_action_=ACTION::TURN_LEFT;
-    if(review_step_-recovery_started_>=6) recovery_active_=false;
-  }
-  expl_manager_->ed_->selected_object_id_=-1;
-  return true;
 }
 
 bool ExplorationFSM::maybeReviewSelected(int exploration_result)
@@ -804,7 +702,7 @@ bool ExplorationFSM::maybeReviewAutomatic()
         id + 1, evidence_revisions_.at(id), review_step_);
     return requestReview(id, selected_mode_, data, false, true);
   }
-  if (review_fused_ && !inspection_candidates_.empty()) {
+  if (review_fused_ && !inspection_candidates_.empty() && !(review_annular_ && review_step_ >= 400)) {
     const int alternative = expl_manager_->reachableConfirmedTarget(fd_->odom_pos_);
     if (alternative >= 0) {
       if (inspection_suppressed_at_ != review_step_) {
@@ -898,7 +796,7 @@ int ExplorationFSM::planInspection()
         (active_view_.goal - active_view_.center).norm());
   expl_manager_->ed_->next_pos_ = active_view_.goal;
   expl_manager_->ed_->next_best_path_ = path;
-  if ((position - active_view_.goal).norm() <= 0.3125 && active_view_.framed(position)) {
+  if ((position - active_view_.goal).norm() <= (active_view_.annular ? .20 : .3125) && active_view_.framed(position)) {
     if (!active_view_.visible(position, clear)) {
       fd_->newest_action_ = ACTION::INSPECTION_FAILED;
       return FINAL_RESULT::EXPLORE;
@@ -907,9 +805,15 @@ int ExplorationFSM::planInspection()
                            active_view_.center.x() - position.x());
     double difference = yaw - fd_->start_yaw_(0);
     wrapAngle(difference);
-    if (std::abs(difference) <= 18.0 * M_PI / 180.0)
+    if (std::abs(difference) <= 18.0 * M_PI / 180.0) {
+      if (active_view_.annular) {
+        RCLCPP_INFO(node_->get_logger(), "[Annular sample] id=%d sample=%zu/%zu step=%d position=(%.4f,%.4f) yaw=%.4f",
+            active_view_.id,active_view_.sample_index+1,active_view_.samples.size(),review_step_,
+            position.x(),position.y(),fd_->start_yaw_(0));
+        if (active_view_.advanceSample()) return planInspection();
+      }
       fd_->newest_action_ = ACTION::INSPECT;
-    else
+    } else
       fd_->newest_action_ = difference > 0 ? ACTION::TURN_LEFT : ACTION::TURN_RIGHT;
   } else {
     fd_->newest_action_ = planNextBestAction(position, fd_->start_yaw_(0), path);
@@ -918,11 +822,38 @@ int ExplorationFSM::planInspection()
     if (fd_->newest_action_ == ACTION::MOVE_FORWARD) {
       Vector2d end = position + 0.25 * Vector2d(
           std::cos(fd_->start_yaw_(0)), std::sin(fd_->start_yaw_(0)));
-      if (!ActiveView::safePath({position, end}, safe))
+      auto motion_safe = [&](const Vector2d& p) {
+        return safe(p) && (!active_view_.annular || !active_view_.sample_index || active_view_.framed(p));
+      };
+      if (!ActiveView::safePath({position, end}, motion_safe))
         fd_->newest_action_ = ACTION::INSPECTION_FAILED;
     }
   }
   return FINAL_RESULT::EXPLORE;
+}
+
+bool ExplorationFSM::maybeLookAtFrontier(const Vector2d& position, double yaw, bool arrived)
+{
+  auto map=expl_manager_->sdf_map_;
+  const double left=node_->get_parameter("perception_utils.left_angle").as_double();
+  const double right=node_->get_parameter("perception_utils.right_angle").as_double();
+  const double range=node_->get_parameter("perception_utils.max_dist").as_double();
+  const double resolution=map->getResolution();
+  if (!(left>0 && right>0 && range>0 && resolution>0)) return false;
+  auto cell=[map](const Vector2d& p) {
+    if (!map->isInMap(p) || map->getOccupancy(p)==SDFMap2D::OCCUPIED) return -1;
+    return map->getOccupancy(p)==SDFMap2D::UNKNOWN ? 1 : 0;
+  };
+  auto address=[map](const Vector2d& p) { Eigen::Vector2i index;map->posToIndex(p,index);return map->toAddress(index); };
+  auto score=[&](double heading) {
+    return FrontierView::gain(position,heading,left,right,range,resolution,cell,address);
+  };
+  const int turn=frontier_view_.next(position,yaw,arrived,score);
+  if (!turn) return false;
+  fd_->newest_action_=turn>0 ? ACTION::TURN_LEFT : ACTION::TURN_RIGHT;
+  RCLCPP_INFO(node_->get_logger(),"[Frontier look] step=%d action=%d current_gain=%d",
+      review_step_,fd_->newest_action_,score(yaw));
+  return true;
 }
 
 int ExplorationFSM::planNextBestAction(
@@ -1002,8 +933,6 @@ double ExplorationFSM::computeActionTotalCost(const Vector2d& current_pos, doubl
   const double traget_close_weight2 = FSMConstants::TARGET_CLOSE_WEIGHT_2;
   const double safety_weight = FSMConstants::SAFETY_WEIGHT;
   double cost = 0.0;
-  if(stable_navigation_ && expl_manager_->navigation_.blockedEdge(current_pos,step,review_step_))
-    return 1e8;
 
   // Distance-to-target cost
   Vector2d step_pos = current_pos + step;

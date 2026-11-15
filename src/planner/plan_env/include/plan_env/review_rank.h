@@ -18,5 +18,15 @@ inline double reviewRank(double fusion, bool enabled, bool late, int state,
     throw std::invalid_argument("Invalid target confidence");
   return 0.5 * fusion + 0.5 * qwen;
 }
+inline bool annularCandidateBefore(int aid, double af, int as, bool aq, double av,
+    int bid, double bf, int bs, bool bq, double bv, bool late) {
+  if ((aq && (!std::isfinite(av) || av<0 || av>1)) ||
+      (bq && (!std::isfinite(bv) || bv<0 || bv>1)))
+    throw std::invalid_argument("Invalid annular target confidence");
+  if ((as==1)!=(bs==1)) return as==1; // Confirmed objects precede uncertain ones.
+  if (late && aq!=bq) return aq;      // Unreviewed fusion-only fallback comes last.
+  const double a=late&&aq?av:af, b=late&&bq?bv:bf;
+  return a==b ? aid<bid : a>b;
+}
 }
 #endif

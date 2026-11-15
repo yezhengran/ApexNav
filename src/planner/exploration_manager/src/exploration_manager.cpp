@@ -15,8 +15,6 @@
 #include <path_searching/kino_astar.h>
 #include <trajectory_manager/optimizer.h>
 #include <cmath>
-#include <plan_env/review_rank.h>
-#include <exploration_manager/active_view.h>
 
 using namespace Eigen;
 
@@ -93,80 +91,13 @@ int ExplorationManager::reachableConfirmedTarget(const Vector3d& start)
   vector<int> ids;
   object_map2d_->getTopConfidenceObjectCloud(clouds, true, false, &ids);
   for (size_t i = 0; i < ids.size(); ++i) {
-    if ((stable_navigation_ && navigation_.cooling(ids[i],navigation_step_)) ||
-        object_map2d_->reviewState(ids[i]) != ObjectMap2D::CONFIRMED ||
+    if (object_map2d_->reviewState(ids[i]) != ObjectMap2D::CONFIRMED ||
         !object_map2d_->reviewEligible(ids[i], false)) continue;
     Vector2d goal;
     vector<Vector2d> path;
     if (searchObjectPath(start, clouds[i], goal, path)) return ids[i];
   }
   return -1;
-}
-
-double ExplorationManager::candidateRank(int id) const
-{
-  vector<double> info;
-  if (!object_map2d_->reviewInfo(id,info)) return -1.;
-  auto q=object_map2d_->qwen_confidences_.find(id);
-  return reviewRank(info[1],object_map2d_->confidence_review_,navigation_step_>=400,
-      object_map2d_->reviewState(id),q!=object_map2d_->qwen_confidences_.end(),
-      q!=object_map2d_->qwen_confidences_.end()?q->second:0.);
-}
-
-bool ExplorationManager::tryStableObject(const Vector3d& pos,
-    const pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& cloud, int id)
-{
-  if (stable_navigation_ && navigation_.cooling(id,navigation_step_)) return false;
-  const Vector2d start=pos.head<2>();
-  if (stable_navigation_ && navigation_.selected==id && navigation_.has_goal) {
-    double object_distance=1e9;
-    for (const auto& p:cloud->points)
-      object_distance=std::min(object_distance,(Vector2d(p.x,p.y)-navigation_.goal).norm());
-    const auto& goal=navigation_.goal;
-    if (object_distance<=1.2 && sdf_map_->isInMap(goal) &&
-        sdf_map_->getOccupancy(goal)==SDFMap2D::FREE && sdf_map_->getInflateOccupancy(goal)!=1) {
-      path_finder_->reset();
-      if (path_finder_->astarSearch(start,goal,0.2,0.2)==Astar2D::REACH_END) {
-        ed_->next_pos_=goal;ed_->next_best_path_=path_finder_->getPath();
-        ed_->selected_object_id_=id;
-        RCLCPP_INFO(node_->get_logger(),"[Navigation hold] step=%d id=%d goal=(%.3f,%.3f)",
-            navigation_step_,id+1,goal.x(),goal.y());
-        return true;
-      }
-    }
-  }
-  if (!searchObjectPath(pos,cloud,ed_->next_pos_,ed_->next_best_path_)) return false;
-  ed_->selected_object_id_=id;
-  if (stable_navigation_) {
-    RCLCPP_INFO(node_->get_logger(),"[Navigation select] step=%d previous=%d id=%d goal=(%.3f,%.3f)",
-        navigation_step_,navigation_.selected+1,id+1,ed_->next_pos_.x(),ed_->next_pos_.y());
-    navigation_.commit(id,ed_->next_pos_,navigation_step_);
-  }
-  return true;
-}
-
-bool ExplorationManager::tryStableObjects(const Vector3d& pos,
-    vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> clouds, vector<int> ids)
-{
-  if (stable_navigation_ && !ids.empty()) {
-    auto current=std::find(ids.begin(),ids.end(),navigation_.selected);
-    if(current!=ids.end() && !navigation_.cooling(*current,navigation_step_) &&
-        (late_navigation_ ? NavigationMemory::keepPriority(
-          candidateRank(*current),candidateRank(ids.front()),
-          object_map2d_->reviewState(*current)==ObjectMap2D::CONFIRMED,
-          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED) :
-         NavigationMemory::keepTarget(navigation_step_-navigation_.selected_at,
-          candidateRank(*current),candidateRank(ids.front()),
-          object_map2d_->reviewState(*current)==ObjectMap2D::CONFIRMED,
-          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED))) {
-      const size_t index=std::distance(ids.begin(),current);
-      std::rotate(ids.begin(),ids.begin()+index,ids.begin()+index+1);
-      std::rotate(clouds.begin(),clouds.begin()+index,clouds.begin()+index+1);
-    }
-  }
-  for(size_t i=0;i<ids.size();++i)
-    if(tryStableObject(pos,clouds[i],ids[i])) return true;
-  return false;
 }
 
 int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw)
@@ -181,38 +112,33 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
   vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> object_clouds;
   vector<int> object_ids;
   ed_->selected_object_id_ = -1;
-  if (late_navigation_ && navigation_step_ >= 400) {
+  if (object_map2d_->annularLate()) {
+    // After the configured step budget, try confirmed objects first, then
+    // unresolved scored objects in latest Qwen order, then unscored fusion.
     object_map2d_->getTopConfidenceObjectCloud(object_clouds, false, false, &object_ids);
-    vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> eligible;
-    vector<int> ids;
-    // Keep confirmed targets first; rank all other hypotheses together, without
-    // changing fusion/Qwen scores or the original arrival/collision checks.
-    for (bool confirmed : {true, false}) for (size_t i=0;i<object_ids.size();++i) {
-      const int id=object_ids[i];
-      if ((object_map2d_->reviewState(id)==ObjectMap2D::CONFIRMED)!=confirmed ||
-          !object_map2d_->lateApproachEligible(id)) continue;
-      eligible.push_back(object_clouds[i]); ids.push_back(id);
-      RCLCPP_INFO(node_->get_logger(),"[Late approach candidate] step=%d id=%d rank=%.9f confirmed=%d cooling=%d",
-          navigation_step_,id+1,candidateRank(id),int(confirmed),int(navigation_.cooling(id,navigation_step_)));
+    for (size_t i=0;i<object_clouds.size();++i) {
+      if (searchObjectPath(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
+        ed_->selected_object_id_=object_ids[i];
+        RCLCPP_INFO(node_->get_logger(), "[Annular late approach] id=%d", object_ids[i]+1);
+        return object_map2d_->reviewState(object_ids[i]) == ObjectMap2D::CONFIRMED ?
+            SEARCH_BEST_OBJECT : SEARCH_SUSPICIOUS_OBJECT;
+      }
     }
-    if (tryStableObjects(pos,eligible,ids)) {
-      RCLCPP_INFO(node_->get_logger(),"[Late approach selected] step=%d id=%d",
-          navigation_step_,ed_->selected_object_id_+1);
-      return SEARCH_SUSPICIOUS_OBJECT;
-    }
-    RCLCPP_INFO(node_->get_logger(),"[Late approach unavailable] step=%d eligible=%zu; exploration fallback",
-        navigation_step_,ids.size());
-    object_clouds.clear();object_ids.clear();
-  } else {
-    sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, true, false, &object_ids);
+    object_clouds.clear(); object_ids.clear();
   }
+  sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, true, false, &object_ids);
 
   // ==================== Navigation Mode: High-Confidence Objects ====================
   if (!object_clouds.empty()) {
     RCLCPP_WARN(node_->get_logger(), "[Navigation Mode] Get object_cloud num = %ld", object_clouds.size());
 
     // Try to find path to each detected object in order of confidence
-    if (tryStableObjects(pos,object_clouds,object_ids)) return SEARCH_BEST_OBJECT;
+    for (size_t i = 0; i < object_clouds.size(); ++i) {
+      if (searchObjectPath(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
+        ed_->selected_object_id_ = object_ids[i];
+        return SEARCH_BEST_OBJECT;
+      }
+    }
   }
 
   // ==================== Navigation Mode: Over-Depth Objects ====================
@@ -243,10 +169,9 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
     RCLCPP_WARN(node_->get_logger(), "Maybe no passable frontier.");
 
     // Try suspicious objects as backup
-    if ((!stable_navigation_ && !top_object_cloud->points.empty() &&
-         searchObjectPath(pos, top_object_cloud, ed_->next_pos_, ed_->next_best_path_)) ||
-        (stable_navigation_ && tryStableObjects(pos,object_clouds,object_ids))) {
-      if (!stable_navigation_) ed_->selected_object_id_ = top_object_id;
+    if (!top_object_cloud->points.empty() &&
+        searchObjectPath(pos, top_object_cloud, ed_->next_pos_, ed_->next_best_path_)) {
+      ed_->selected_object_id_ = top_object_id;
       return SEARCH_SUSPICIOUS_OBJECT;
     }
     else
@@ -260,8 +185,7 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
 
       // Try extreme object search with relaxed constraints
       for (size_t i = 0; i < object_clouds.size(); ++i) {
-        if ((!stable_navigation_ || !navigation_.cooling(object_ids[i],navigation_step_)) &&
-            !object_clouds[i]->points.empty() &&
+        if (!object_clouds[i]->points.empty() &&
             searchObjectPathExtreme(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
           ed_->selected_object_id_ = object_ids[i];
           return SEARCH_EXTREME;
@@ -271,8 +195,7 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
       // Include lower confidence objects in extreme search
       sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, false, true, &object_ids);
       for (size_t i = 0; i < object_clouds.size(); ++i) {
-        if ((!stable_navigation_ || !navigation_.cooling(object_ids[i],navigation_step_)) &&
-            !object_clouds[i]->points.empty() &&
+        if (!object_clouds[i]->points.empty() &&
             searchObjectPathExtreme(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
           ed_->selected_object_id_ = object_ids[i];
           return SEARCH_EXTREME;
@@ -320,7 +243,6 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
 void ExplorationManager::chooseExplorationPolicy(Vector2d cur_pos, vector<Vector2d> frontiers,
     Vector2d& next_best_pos, vector<Vector2d>& next_best_path)
 {
-  if(regional_navigation_) {regionalExplore(cur_pos,frontiers,next_best_pos,next_best_path);return;}
   switch (ep_->policy_mode_) {
     case ExplorationParam::DISTANCE:
       RCLCPP_WARN(node_->get_logger(), "[Exploration Mode] Find Closest Frontier");
@@ -346,107 +268,6 @@ void ExplorationManager::chooseExplorationPolicy(Vector2d cur_pos, vector<Vector
       RCLCPP_WARN(node_->get_logger(), "[Exploration Mode] Unknown Mode");
       break;
   }
-}
-
-double ExplorationManager::regionalInformation(const Vector2d& point) const
-{
-  // Expected visible unknown area, stopping at observed walls; never mark it free.
-  int unknown=0,total=0;
-  for(int k=0;k<16;++k) {
-    Vector2d direction(std::cos(k*M_PI/8.),std::sin(k*M_PI/8.));
-    for(double distance=.2;distance<=1.4;distance+=.2) {
-      const Vector2d q=point+distance*direction;++total;
-      if(!sdf_map_->isInMap(q) || sdf_map_->getOccupancy(q)==SDFMap2D::OCCUPIED)break;
-      if(sdf_map_->getOccupancy(q)==SDFMap2D::UNKNOWN)++unknown;
-    }
-  }
-  return total?double(unknown)/total:0.;
-}
-
-void ExplorationManager::regionalExplore(const Vector2d& current,const vector<Vector2d>& frontiers,
-    Vector2d& goal,vector<Vector2d>& path)
-{
-  path.clear();auto& memory=regions_;
-  auto safe=[this](const Vector2d& p){return sdf_map_->isInMap(p) &&
-    sdf_map_->getOccupancy(p)==SDFMap2D::FREE && sdf_map_->getInflateOccupancy(p)!=1;};
-  if(memory.valid && navigation_step_<memory.reconsider_after &&
-      (memory.goal-current).norm()>.4 && safe(memory.goal) &&
-      !memory.cooling(memory.goal,navigation_step_) && regionalInformation(memory.goal)>=.08) {
-    path_finder_->reset();
-    if(path_finder_->astarSearch(current,memory.goal,.15,.02,Astar2D::NORMAL)==Astar2D::REACH_END) {
-      path=path_finder_->getPath();
-      if(ActiveView::safePath(path,safe)) {
-        goal=memory.goal;
-        RCLCPP_INFO(node_->get_logger(),"[Region hold] step=%d goal=(%.3f,%.3f)",navigation_step_,goal.x(),goal.y());
-        return;
-      }
-      path.clear();
-    }
-  }
-  struct Option {Vector2d point,frontier;double info,semantic,score;vector<Vector2d> path;};
-  vector<Option> options;std::set<std::pair<int,int>> sampled;
-  auto add=[&](const Vector2d& point,const Vector2d& frontier){
-    if((point-current).norm()<.4 || !safe(point) || memory.cooling(point,navigation_step_))return;
-    auto bin=std::make_pair(int(std::floor(point.x()/.35)),int(std::floor(point.y()/.35)));
-    if(!sampled.insert(bin).second)return;
-    double information=regionalInformation(point);if(information<.08)return;
-    Vector2i index;sdf_map_->posToIndex(point,index);
-    const double raw_semantic=sdf_map_->value_map_->getValue(index);
-    const double semantic=std::isfinite(raw_semantic)?std::max(0.,raw_semantic):0.;
-    const int visits=memory.visits[RegionMemory::key(point)];
-    options.push_back({point,frontier,information,semantic,
-      RegionMemory::utility(information,semantic,(point-current).norm(),visits),{}});
-  };
-  // Frontiers lie on the unknown side in ApexNav. Approach from observed free space.
-  for(const auto& frontier:frontiers) {
-    for(double radius:{.3,.55,.8})for(int k=0;k<8;++k)
-      add(frontier+radius*Vector2d(std::cos(k*M_PI/4.),std::sin(k*M_PI/4.)),frontier);
-  }
-  // Small doorway boundaries can disappear during cluster filtering. Keep local
-  // known-free viewing sites with information gain even without a large cluster.
-  for(double radius:{.75,1.25,1.75,2.5,3.25,4.0})for(int k=0;k<24;++k)
-    add(current+radius*Vector2d(std::cos(k*M_PI/12.),std::sin(k*M_PI/12.)),current);
-  if(memory.valid)add(memory.goal,memory.frontier);
-  std::stable_sort(options.begin(),options.end(),[](const Option& a,const Option& b){return a.score>b.score;});
-  vector<Option> diverse;std::map<RegionMemory::Key,int> per_region;
-  for(const auto& option:options) {
-    if(per_region[RegionMemory::key(option.point)]++<4)diverse.push_back(option);
-    if(diverse.size()>=48)break;
-  }
-  options=std::move(diverse);
-  vector<Option> reachable;
-  for(auto& option:options) {
-    path_finder_->reset();
-    if(path_finder_->astarSearch(current,option.point,.15,.02,Astar2D::NORMAL)!=Astar2D::REACH_END)continue;
-    option.path=path_finder_->getPath();
-    if(!ActiveView::safePath(option.path,safe))continue;
-    option.score=RegionMemory::utility(option.info,option.semantic,Astar2D::pathLength(option.path),
-      memory.visits[RegionMemory::key(option.point)]);
-    reachable.push_back(option);
-  }
-  if(reachable.empty()){memory.valid=false;return;}
-  // First choose a reachable region, then its best local viewing site.
-  std::map<RegionMemory::Key,size_t> best;
-  for(size_t i=0;i<reachable.size();++i) {
-    auto key=RegionMemory::key(reachable[i].point);auto it=best.find(key);
-    if(it==best.end() || reachable[i].score>reachable[it->second].score)best[key]=i;
-  }
-  size_t selected=best.begin()->second;
-  for(const auto& item:best)if(reachable[item.second].score>reachable[selected].score)selected=item.second;
-  auto prior=best.find(memory.selected);
-  if(memory.valid && prior!=best.end() && RegionMemory::keep(navigation_step_,memory.hold_until,
-      reachable[prior->second].score,reachable[selected].score))selected=prior->second;
-  if(memory.valid && RegionMemory::key(reachable[selected].point)==memory.selected)
-    for(size_t i=0;i<reachable.size();++i)
-      if((reachable[i].point-memory.goal).norm()<.15 &&
-         reachable[i].score+.20>=reachable[selected].score) {selected=i;break;}
-  const auto& option=reachable[selected];auto key=RegionMemory::key(option.point);
-  if(!memory.valid || key!=memory.selected)memory.hold_until=navigation_step_+32;
-  memory.reconsider_after=navigation_step_+8;
-  memory.selected=key;memory.goal=option.point;memory.frontier=option.frontier;memory.valid=true;
-  goal=option.point;path=option.path;
-  RCLCPP_INFO(node_->get_logger(),"[Region select] step=%d region=(%d,%d) goal=(%.3f,%.3f) gain=%.3f visits=%d score=%.3f reachable=%zu",
-    navigation_step_,key.first,key.second,goal.x(),goal.y(),option.info,memory.visits[key],option.score,reachable.size());
 }
 
 void ExplorationManager::hybridExplorePolicy(Vector2d cur_pos, vector<Vector2d> frontiers,

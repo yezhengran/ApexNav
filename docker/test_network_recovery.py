@@ -105,6 +105,28 @@ class RecoveryTest(unittest.TestCase):
     def test_actual_batch_loop_restarts_worker_and_appends_once(self):
         self.run_batch_loop_case()
 
+    def test_joint_images_all_match_in_order_before_recovery(self):
+        first = Path(self.event['crop'])
+        second = self.attempt/'second.png'; second.write_bytes(b'second-image')
+        self.event['crops'] = [str(first), str(second)]
+        self.bill.update(image_count=2, image_sha256s=[hashlib.sha256(p.read_bytes()).hexdigest()
+                                                      for p in (first,second)])
+        self.write()
+        self.assertEqual(eligible_failure(self.run,self.ledger,10)['episode'],2)
+        second.write_bytes(b'changed')
+        with self.assertRaisesRegex(RuntimeError,'multi-image'): self.recover()
+        self.assertFalse((self.run/'network-recovery').exists())
+
+    def test_joint_missing_hash_order_or_external_image_never_recovers(self):
+        first=Path(self.event['crop']);second=self.attempt/'second.png';second.write_bytes(b'second')
+        hashes=[hashlib.sha256(p.read_bytes()).hexdigest() for p in (first,second)]
+        cases=[([str(first),str(second)],list(reversed(hashes)),2),
+               ([str(first)],hashes,2),([str(first),str(second)],[],2),
+               ([str(first),str(self.ledger)],hashes,2)]
+        for crops,values,count in cases:
+            self.event['crops']=crops;self.bill.update(image_count=count,image_sha256s=values);self.write()
+            with self.assertRaisesRegex(RuntimeError,'multi-image'): self.recover()
+
     def test_fixed_index_network_restart_preserves_identity_and_appends_once(self):
         self.run_batch_loop_case(single_index=196)
 
