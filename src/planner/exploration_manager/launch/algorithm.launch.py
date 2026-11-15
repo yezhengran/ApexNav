@@ -19,6 +19,7 @@ def generate_launch_description():
     lkh_mtsp_solver_share = get_package_share_directory('lkh_mtsp_solver')
 
     navigation_stable_arg = DeclareLaunchArgument('navigation_stable_', default_value='false')
+    navigation_regional_arg = DeclareLaunchArgument('navigation_regional_', default_value='false')
     step_sync_arg = DeclareLaunchArgument('step_sync_', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled_', default_value='false')
     review_automatic_arg = DeclareLaunchArgument('review_automatic_', default_value='false')
@@ -62,6 +63,7 @@ def generate_launch_description():
                 # FSM mode selection
                 'is_real_world': LaunchConfiguration('is_real_world_'),
                 'navigation.stable': LaunchConfiguration('navigation_stable_'),
+                'navigation.regional': LaunchConfiguration('navigation_regional_'),
                 'navigation.step_sync': LaunchConfiguration('step_sync_'),
                 'review.enabled': LaunchConfiguration('review_enabled_'),
                 'review.automatic': LaunchConfiguration('review_automatic_'),
@@ -164,6 +166,7 @@ def generate_launch_description():
         fy_arg,
         is_real_world_arg,
         navigation_stable_arg,
+        navigation_regional_arg,
         step_sync_arg,
         review_enabled_arg,
         review_automatic_arg,

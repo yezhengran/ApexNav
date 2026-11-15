@@ -18,6 +18,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   if (first_init) {
     node_->declare_parameter("navigation.step_sync", false);
     node_->declare_parameter("navigation.stable", false);
+    node_->declare_parameter("navigation.regional", false);
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
@@ -30,6 +31,9 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("navigation.step_sync", step_sync_);
   node_->get_parameter("navigation.stable", stable_navigation_);
+  node_->get_parameter("navigation.regional", regional_navigation_);
+  if(regional_navigation_ && !stable_navigation_)throw std::invalid_argument("Regional navigation requires stable execution");
+  regional_scan_until_=-1;
   if (stable_navigation_ && !step_sync_)
     throw std::invalid_argument("Stable navigation requires step-sync");
   recovery_active_=false;recovery_has_goal_=false;recovery_started_=0;recovery_goal_.setZero();
@@ -76,6 +80,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   expl_manager_.reset(new ExplorationManager);
   expl_manager_->initialize(node_);
   expl_manager_->stable_navigation_=stable_navigation_;
+  expl_manager_->regional_navigation_=regional_navigation_;
   expl_manager_->object_map2d_->stop_review_gating_ = review_stop_;
   expl_manager_->object_map2d_->fused_review_gating_ = review_fused_;
   expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
@@ -405,6 +410,7 @@ int ExplorationFSM::callActionPlanner()
   // Inspection is a bounded detour, never a REACH_OBJECT/STOP condition.
   // With no request the original planner takes exactly the baseline path.
   expl_manager_->navigation_step_=review_step_;
+  if(regional_navigation_)expl_manager_->regions_.observe(review_step_,current_pos);
   if (active_view_.id) {
     if(stable_navigation_) expl_manager_->navigation_.window.clear();
     return planInspection();
@@ -427,6 +433,10 @@ int ExplorationFSM::callActionPlanner()
     if (maybeReviewStop()) return FINAL_RESULT::SEARCH_OBJECT;
     RCLCPP_ERROR(node_->get_logger(), "Reach the object successfully!!!");
     return FINAL_RESULT::REACH_OBJECT;
+  }
+  if(regional_navigation_ && review_step_<regional_scan_until_) {
+    fd_->newest_action_=ACTION::TURN_LEFT;
+    return FINAL_RESULT::EXPLORE;
   }
   if(stable_navigation_ && monitoredRecovery(current_pos,last_pos))
     return FINAL_RESULT::EXPLORE;
@@ -560,6 +570,13 @@ int ExplorationFSM::callActionPlanner()
     final_res = FINAL_RESULT::SEARCH_OBJECT;
 
   if (final_res == FINAL_RESULT::NO_FRONTIER || expl_manager_->ed_->next_best_path_.empty()) {
+    if(regional_navigation_ && expl_manager_->regions_.scans<2) {
+      ++expl_manager_->regions_.scans;regional_scan_until_=review_step_+12;
+      expl_manager_->navigation_.window.clear();fd_->stucking_action_count_=0;
+      fd_->newest_action_=ACTION::TURN_LEFT;
+      RCLCPP_WARN(node_->get_logger(),"[Region rescan] step=%d attempt=%d",review_step_,expl_manager_->regions_.scans);
+      return FINAL_RESULT::EXPLORE;
+    }
     RCLCPP_WARN(node_->get_logger(), "No (passable) frontier");
     return final_res;
   }
@@ -657,8 +674,10 @@ bool ExplorationFSM::monitoredRecovery(const Vector2d& current, const Vector2d& 
   if(!recovery_active_ && reason && memory.recovery_count<4) {
     RCLCPP_WARN(node_->get_logger(),"[Navigation recovery] step=%d reason=%s id=%d attempt=%d",
         review_step_,reason==1?"blocked":"no_progress",memory.selected+1,memory.recovery_count+1);
-    if(fd_->final_result_==FINAL_RESULT::EXPLORE)
+    if(fd_->final_result_==FINAL_RESULT::EXPLORE) {
       expl_manager_->frontier_map2d_->setForceDormantFrontier(expl_manager_->ed_->next_pos_);
+      if(regional_navigation_)expl_manager_->regions_.block(expl_manager_->ed_->next_pos_,review_step_);
+    }
     memory.abandon(review_step_);++memory.recovery_count;
     recovery_started_=review_step_;recovery_active_=true;recovery_has_goal_=false;recovery_goal_=current;
     // First return along a recently traversed, still-known-free route.

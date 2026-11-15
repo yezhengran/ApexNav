@@ -16,6 +16,7 @@
 #include <trajectory_manager/optimizer.h>
 #include <cmath>
 #include <plan_env/review_rank.h>
+#include <exploration_manager/active_view.h>
 
 using namespace Eigen;
 
@@ -291,6 +292,7 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
 void ExplorationManager::chooseExplorationPolicy(Vector2d cur_pos, vector<Vector2d> frontiers,
     Vector2d& next_best_pos, vector<Vector2d>& next_best_path)
 {
+  if(regional_navigation_) {regionalExplore(cur_pos,frontiers,next_best_pos,next_best_path);return;}
   switch (ep_->policy_mode_) {
     case ExplorationParam::DISTANCE:
       RCLCPP_WARN(node_->get_logger(), "[Exploration Mode] Find Closest Frontier");
@@ -316,6 +318,107 @@ void ExplorationManager::chooseExplorationPolicy(Vector2d cur_pos, vector<Vector
       RCLCPP_WARN(node_->get_logger(), "[Exploration Mode] Unknown Mode");
       break;
   }
+}
+
+double ExplorationManager::regionalInformation(const Vector2d& point) const
+{
+  // Expected visible unknown area, stopping at observed walls; never mark it free.
+  int unknown=0,total=0;
+  for(int k=0;k<16;++k) {
+    Vector2d direction(std::cos(k*M_PI/8.),std::sin(k*M_PI/8.));
+    for(double distance=.2;distance<=1.4;distance+=.2) {
+      const Vector2d q=point+distance*direction;++total;
+      if(!sdf_map_->isInMap(q) || sdf_map_->getOccupancy(q)==SDFMap2D::OCCUPIED)break;
+      if(sdf_map_->getOccupancy(q)==SDFMap2D::UNKNOWN)++unknown;
+    }
+  }
+  return total?double(unknown)/total:0.;
+}
+
+void ExplorationManager::regionalExplore(const Vector2d& current,const vector<Vector2d>& frontiers,
+    Vector2d& goal,vector<Vector2d>& path)
+{
+  path.clear();auto& memory=regions_;
+  auto safe=[this](const Vector2d& p){return sdf_map_->isInMap(p) &&
+    sdf_map_->getOccupancy(p)==SDFMap2D::FREE && sdf_map_->getInflateOccupancy(p)!=1;};
+  if(memory.valid && navigation_step_<memory.reconsider_after &&
+      (memory.goal-current).norm()>.4 && safe(memory.goal) &&
+      !memory.cooling(memory.goal,navigation_step_) && regionalInformation(memory.goal)>=.08) {
+    path_finder_->reset();
+    if(path_finder_->astarSearch(current,memory.goal,.15,.02,Astar2D::NORMAL)==Astar2D::REACH_END) {
+      path=path_finder_->getPath();
+      if(ActiveView::safePath(path,safe)) {
+        goal=memory.goal;
+        RCLCPP_INFO(node_->get_logger(),"[Region hold] step=%d goal=(%.3f,%.3f)",navigation_step_,goal.x(),goal.y());
+        return;
+      }
+      path.clear();
+    }
+  }
+  struct Option {Vector2d point,frontier;double info,semantic,score;vector<Vector2d> path;};
+  vector<Option> options;std::set<std::pair<int,int>> sampled;
+  auto add=[&](const Vector2d& point,const Vector2d& frontier){
+    if((point-current).norm()<.4 || !safe(point) || memory.cooling(point,navigation_step_))return;
+    auto bin=std::make_pair(int(std::floor(point.x()/.35)),int(std::floor(point.y()/.35)));
+    if(!sampled.insert(bin).second)return;
+    double information=regionalInformation(point);if(information<.08)return;
+    Vector2i index;sdf_map_->posToIndex(point,index);
+    const double raw_semantic=sdf_map_->value_map_->getValue(index);
+    const double semantic=std::isfinite(raw_semantic)?std::max(0.,raw_semantic):0.;
+    const int visits=memory.visits[RegionMemory::key(point)];
+    options.push_back({point,frontier,information,semantic,
+      RegionMemory::utility(information,semantic,(point-current).norm(),visits),{}});
+  };
+  // Frontiers lie on the unknown side in ApexNav. Approach from observed free space.
+  for(const auto& frontier:frontiers) {
+    for(double radius:{.3,.55,.8})for(int k=0;k<8;++k)
+      add(frontier+radius*Vector2d(std::cos(k*M_PI/4.),std::sin(k*M_PI/4.)),frontier);
+  }
+  // Small doorway boundaries can disappear during cluster filtering. Keep local
+  // known-free viewing sites with information gain even without a large cluster.
+  for(double radius:{.75,1.25,1.75,2.5,3.25,4.0})for(int k=0;k<24;++k)
+    add(current+radius*Vector2d(std::cos(k*M_PI/12.),std::sin(k*M_PI/12.)),current);
+  if(memory.valid)add(memory.goal,memory.frontier);
+  std::stable_sort(options.begin(),options.end(),[](const Option& a,const Option& b){return a.score>b.score;});
+  vector<Option> diverse;std::map<RegionMemory::Key,int> per_region;
+  for(const auto& option:options) {
+    if(per_region[RegionMemory::key(option.point)]++<4)diverse.push_back(option);
+    if(diverse.size()>=48)break;
+  }
+  options=std::move(diverse);
+  vector<Option> reachable;
+  for(auto& option:options) {
+    path_finder_->reset();
+    if(path_finder_->astarSearch(current,option.point,.15,.02,Astar2D::NORMAL)!=Astar2D::REACH_END)continue;
+    option.path=path_finder_->getPath();
+    if(!ActiveView::safePath(option.path,safe))continue;
+    option.score=RegionMemory::utility(option.info,option.semantic,Astar2D::pathLength(option.path),
+      memory.visits[RegionMemory::key(option.point)]);
+    reachable.push_back(option);
+  }
+  if(reachable.empty()){memory.valid=false;return;}
+  // First choose a reachable region, then its best local viewing site.
+  std::map<RegionMemory::Key,size_t> best;
+  for(size_t i=0;i<reachable.size();++i) {
+    auto key=RegionMemory::key(reachable[i].point);auto it=best.find(key);
+    if(it==best.end() || reachable[i].score>reachable[it->second].score)best[key]=i;
+  }
+  size_t selected=best.begin()->second;
+  for(const auto& item:best)if(reachable[item.second].score>reachable[selected].score)selected=item.second;
+  auto prior=best.find(memory.selected);
+  if(memory.valid && prior!=best.end() && RegionMemory::keep(navigation_step_,memory.hold_until,
+      reachable[prior->second].score,reachable[selected].score))selected=prior->second;
+  if(memory.valid && RegionMemory::key(reachable[selected].point)==memory.selected)
+    for(size_t i=0;i<reachable.size();++i)
+      if((reachable[i].point-memory.goal).norm()<.15 &&
+         reachable[i].score+.20>=reachable[selected].score) {selected=i;break;}
+  const auto& option=reachable[selected];auto key=RegionMemory::key(option.point);
+  if(!memory.valid || key!=memory.selected)memory.hold_until=navigation_step_+32;
+  memory.reconsider_after=navigation_step_+8;
+  memory.selected=key;memory.goal=option.point;memory.frontier=option.frontier;memory.valid=true;
+  goal=option.point;path=option.path;
+  RCLCPP_INFO(node_->get_logger(),"[Region select] step=%d region=(%d,%d) goal=(%.3f,%.3f) gain=%.3f visits=%d score=%.3f reachable=%zu",
+    navigation_step_,key.first,key.second,goal.x(),goal.y(),option.info,memory.visits[key],option.score,reachable.size());
 }
 
 void ExplorationManager::hybridExplorePolicy(Vector2d cur_pos, vector<Vector2d> frontiers,

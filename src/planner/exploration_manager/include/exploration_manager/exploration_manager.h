@@ -4,6 +4,7 @@
 // Third-party libraries
 #include <Eigen/Eigen>
 #include <exploration_manager/navigation_memory.h>
+#include <exploration_manager/region_memory.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -94,7 +95,8 @@ public:
   shared_ptr<KinoAstar> kinoastar_;           ///< Kinodynamic A* planner (for real-world)
 
   int reachableConfirmedTarget(const Vector3d& start);
-  bool stable_navigation_ = false;
+  bool stable_navigation_ = false, regional_navigation_ = false;
+  RegionMemory regions_;
   int navigation_step_ = 0;
   NavigationMemory navigation_;
   bool tryStableObjects(const Vector3d& pos,
@@ -107,6 +109,10 @@ public:
 
 private:
   rclcpp::Node::SharedPtr node_;
+
+  double regionalInformation(const Vector2d& point) const;
+  void regionalExplore(const Vector2d& current, const vector<Vector2d>& frontiers,
+      Vector2d& goal, vector<Vector2d>& path);
 
   // Exploration Policy
   void chooseExplorationPolicy(Vector2d cur_pos, vector<Vector2d> frontiers,
