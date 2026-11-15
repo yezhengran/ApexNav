@@ -100,35 +100,6 @@ def framing_distance(extent, envelope, camera_height, pitch, hfov, shape):
             'horizontal_half_fov_degrees': math.degrees(half_h), 'image_fraction': IMAGE_FRACTION}
 
 
-def adaptive_framing_distance(extent, envelope, camera_height, pitch, hfov, shape):
-    """Prefer full framing, allow a reachable partial view with visible centroid.
-
-    Collision clearance is still enforced by the unchanged occupancy map. The
-    hard center distance retains a 1.1m standoff from the conservative footprint;
-    partial framing never claims that the whole reconstructed object is visible.
-    """
-    full = framing_distance(extent, envelope, camera_height, pitch, hfov, shape)
-    if envelope is None or full['reason'] == 'fixed_pitch_or_fov_cannot_frame':
-        return {**full, 'viewpoint_policy': 'adaptive_partial_v1',
-                'preferred_full_radius': full['radius'], 'partial_view_allowed': False}
-    center_height = float(envelope['centroid'][2])
-    if not math.isfinite(center_height) or not envelope['low'][2] <= center_height <= envelope['high'][2]:
-        raise ValueError('Invalid object centroid')
-    half_v = math.radians(full['vertical_half_fov_degrees'])
-    relative = center_height - camera_height
-    vertical = max(0., relative/math.tan(pitch+half_v), -relative/math.tan(half_v-pitch))
-    minimum = float(max(full['footprint_radius']+1.1,
-                        full['footprint_radius']+vertical,
-                        observation_radius(extent)+.25))
-    feasible = minimum + ARRIVAL_MARGIN <= MAX_RADIUS
-    preferred = min(MAX_RADIUS, max(minimum + ARRIVAL_MARGIN, full['radius']))
-    return {**full, 'feasible': feasible, 'reason': 'reachable_partial_framing',
-            'viewpoint_policy': 'adaptive_partial_v1', 'partial_view_allowed': True,
-            'preferred_full_radius': full['radius'], 'radius': preferred,
-            'minimum_radius': minimum, 'max_radius': MAX_RADIUS,
-            'centroid_height': center_height, 'centroid_vertical_surface_distance': float(vertical)}
-
-
 class FramingTargetReviewer(ConfidenceTargetReviewer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -146,10 +117,6 @@ class FramingTargetReviewer(ConfidenceTargetReviewer):
     def _source_metadata(self, packet):
         return {'camera_height': packet['camera_height']}
 
-    def _framing(self, extent, envelope, shape):
-        function = adaptive_framing_distance if getattr(self.cfg, "adaptive_framing", False) else framing_distance
-        return function(extent, envelope, self.camera_height, self.pitch, self.sensor.hfov, shape)
-
     def _inspection_geometry(self, extent):
         chosen = self.frames[self.selected['id']][0]
         source = self.directory / f'geometry-{self.selected["id"]:03d}-s{chosen["step"]:04d}-m{chosen["key"][1]:02d}.npz'
@@ -157,7 +124,7 @@ class FramingTargetReviewer(ConfidenceTargetReviewer):
         with np.load(source, allow_pickle=False) as packet:
             envelope = object_envelope(packet, self.sensor)
             shape = tuple(packet['mask_shape'])
-        geometry = self._framing(extent, envelope, shape)
+        geometry = framing_distance(extent, envelope, self.camera_height, self.pitch, self.sensor.hfov, shape)
         self.event('inspection_geometry', candidate=self.selected['id'], observation=chosen['step'],
                    mask_index=chosen['key'][1], source_file=str(source), envelope=envelope,
                    original_radius=observation_radius(extent), extent=extent, **geometry)
@@ -172,17 +139,16 @@ class FramingTargetReviewer(ConfidenceTargetReviewer):
     def request(self):
         if self.active is None:
             return []
-        return super().request() + [self.active['minimum_radius'], self.active['max_radius']] + (
-            [1.] if getattr(self.cfg, 'adaptive_framing', False) else [])
+        return super().request() + [self.active['minimum_radius'], self.active['max_radius']]
 
     def finish_inspection(self, reachable=True):
         if reachable:
             target = self.active
-            needed = self._framing(target['geometry_extent'], target['envelope'], target['image_shape'])
+            needed = framing_distance(target['geometry_extent'], target['envelope'], self.camera_height,
+                                      self.pitch, self.sensor.hfov, target['image_shape'])
             distance = float(np.linalg.norm(target['center']-np.array(self.pose[:2])))
             self.event('inspection_framing_arrival', candidate=target['id'], distance=distance,
-                       minimum_radius=needed['minimum_radius'], camera_height=self.camera_height, pitch=self.pitch,
-                       full_framing=(distance+1e-5 >= needed.get('preferred_full_radius', needed['radius'])-ARRIVAL_MARGIN))
+                       minimum_radius=needed['minimum_radius'], camera_height=self.camera_height, pitch=self.pitch)
             if not needed['feasible'] or distance+1e-5 < needed['minimum_radius']:
                 return self._finish('arrival_outside_framing_envelope')
         return super().finish_inspection(reachable)
