@@ -3,7 +3,11 @@
 <!-- Q8_HANDOFF_START -->
 **2026-11-15最新授权：仅Q8前100，清理其他旧实验。** 已保留Q2-full1000/Q2-demo73与全部来源原件，49355文件清理前后哈希一致；其他原始实验输出/控制/日志及旧构建已删除，共约12.75GiB。删除7本地/6远程旧实验分支，当前实验分支仅Q2与Q8，Git历史及基础分支不改。共享账本2.691819元和所有历史预留保留。下方旧实验状态仅历史描述，路径可能已删除，禁止恢复旧入口。
 
-当前Q8分支`codex/objectnav-annular-top5`；独立完整overlay `outputs/build/annular-top5-full-20261115/install`。本批唯一控制目录`experiment_notes/qwen-annular-first100-20261115`，固定HM3Dv2 val全局1–100全部新跑，seed100/500步/step_sync/linked_annular，frontier-look关闭，只保留失败视频。先检查真实进程及protocol/started/round-status/latest-checkpoint/results/comparison，再判断是否启动，禁止重复入口。只读`status.py`。每小时有意义进度更新，同身份对比Q2；完成100后停止模型、独立验收报告并暂停，不扩展。详见[Q8前100协议](experiments/2026-11-15-qwen-annular-first100.zh-CN.md)。
+**2026-11-16 01:08北京，Q8-first100已完成并独立验收：80/100，SR80.00%、SPL43.2433%、SoftSPL44.5326%。** Q2同100为78/100、SPL40.6128%、SoftSPL42.6519%；Q8新增成功51/69/84、退化37。100个身份全部新跑、首个完整结果唯一纳入；20个失败视频5039帧全解码，成功视频已删除。134次复查／134次HTTP，5次联合共17图、3次含补拍新图，219观测动作，0网络重试／恢复。新增0.140920元，共享账本2.832739/20元，旧预留保持。
+
+当前Q8分支`codex/objectnav-annular-top5`，实际运行提交`2c859f82dc1474c635f9474c74a7e8a91067ad8b`、190源`c68d4991a7e5e96e03d53ca66d48db822315bb2e4043bafcb00d7a2123df660e`；独立完整overlay `outputs/build/annular-top5-full-20261115/install`。633安装文件、原安装41、权重词表18、49354个Q2文件与控制／旧账本均通过核验。评测、规划器、控制器、四模型全部退出，容器仅sleep。小时跟进在最终报告后暂停；**禁止重复任何入口，不扩展101以后，等待用户下一步。**
+
+本批控制／结果／独立验收在`experiment_notes/qwen-annular-first100-20261115`，交付明细在其`delivery/`；输出与20个失败视频在`outputs/runs/qwen-annular-first100-20261115/gNNNN/`，视频绝对路径见`delivery/failure-videos.csv`。固定HM3Dv2 val 1–100，seed100/500步/step_sync/linked_annular，frontier-look关闭。这里只验证前100的Q8整体组合，不能归为单一多图收益或完整1000泛化提升。详见[Q8前100最终报告](experiments/2026-11-15-qwen-annular-first100.zh-CN.md)。下方旧启动、暂停与自动跟进描述全部属于历史。
 <!-- Q8_HANDOFF_END -->
 
 **最新复跑结果（2026-11-14 22:58北京）：Q6-plant060-fail6完成6/6，恢复成功3/6（50%），已全部停止。** 用户授权在刚讨论的Q6前100盆栽失败上验证0.60阈值；固定47/54/59/76/90/99，seed100、500步、首个完整结果唯一纳入。47/54/59分别141/114/80步成功；76/90无Qwen调用仍无前沿失败；99在270步Qwen0.70确认后470步受阻失败，评测距离0.9036米。只保留3失败视频共1103帧，6身份/crop/来源/HTTP/源码/旧证据独立验收通过，6次HTTP无重试，14主动观测动作。费用0.006654，账本总1.539652/20元，旧预留保留。运行提交`94a318c`、183源`7906a865…`，同`codex/objectnav-height-aware-viewpoint`分支。输出`outputs/runs/qwen-plant060-fail6-20261114/`，有效记录`experiment_notes/qwen-plant060-fail6-20261114/independent-validation.json`及`comparison.json`。控制器/评测/规划器/四模型均已退出，所有入口不可重跑；没有扩展授权，旧自动跟进继续暂停。原Q6-first100仍78/100，不选择性替换成绩。见[修订与复跑报告](experiments/2026-11-14-qwen-plant060.zh-CN.md)。下方未评测描述是此次真实复跑前的历史状态。
