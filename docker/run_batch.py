@@ -55,6 +55,8 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         command.append("+navigation_step_sync=true")
     if navigation_profile != 'legacy':
         command.append(f'+navigation_profile={navigation_profile}')
+        if navigation_profile == 'adaptive':
+            command.append('+active_view.adaptive_framing=true')
     if method != "baseline":
         command.extend([f"active_view.mode={method}",
                         f"active_view.itm_confirm_threshold={confirm_threshold}",
@@ -224,7 +226,7 @@ def main():
     parser.add_argument("--episode-index", type=int, default=-1,
                         help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
-    parser.add_argument('--navigation-profile', choices=['legacy', 'stable', 'regional'], default='legacy',
+    parser.add_argument('--navigation-profile', choices=['legacy', 'stable', 'regional', 'adaptive'], default='legacy',
                         help='Opt-in staged navigation; never changes legacy profiles')
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
@@ -350,10 +352,15 @@ def main():
         spec['navigation_policy'] = {'target_margin': .08, 'minimum_commit_steps': 24,
             'progress_window': 24, 'candidate_cooldown_steps': 60,
             'failed_edge_steps': 40, 'recovery_actions': 16, 'max_recoveries': 4}
-    if args.navigation_profile == 'regional':
+    if args.navigation_profile in ('regional', 'adaptive'):
         spec['regional_policy']={'region_m':2.5,'commit_steps':32,'switch_margin':.20,'reconsider_steps':8,
             'local_boundary_search_m':4.,'failed_site_cooldown':80,'max_horizontal_scans':2,'scan_steps':12,
             'known_free_routes_only':True,'unknown_gain_weight':1.5,'semantic_weight':.8}
+    if args.navigation_profile == 'adaptive':
+        spec['viewpoint_policy']={'name':'adaptive_partial_v1','preferred':'full_framing',
+            'hard':'footprint_plus_1.1m_and_centroid_in_fixed_fov',
+            'radii':'minimum_plus_arrival_to_4.5m','replans':2,'directions':32,'max_path_m':8.,
+            'crop':'unchanged_singleton_best_history','pitch_actions':False}
     if args.step_sync:
         spec["navigation_step_sync"] = True
     if args.failure_videos:
@@ -459,7 +466,7 @@ def main():
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
                              *(['navigation_stable:=true'] if args.navigation_profile != 'legacy' else []),
-                             *(['navigation_regional:=true'] if args.navigation_profile == 'regional' else []),
+                             *(['navigation_regional:=true'] if args.navigation_profile in ('regional', 'adaptive') else []),
                              *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing') else []),
                              *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') else []),
                              *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing') else [])],

@@ -17,7 +17,8 @@ public:
   Eigen::Vector2d center = Eigen::Vector2d::Zero();
   double radius = 0.0, extent = 0.0;
   double minimum_radius = 0.0, max_radius = 0.0;
-  bool framing = false;
+  bool framing = false, adaptive = false;
+  int replans = 0;
   bool locked = false;
   bool turn_first = false, oriented = false;
   int orientation_steps = 0;
@@ -28,20 +29,21 @@ public:
   bool set(const std::vector<double>& data)
   {
     if (data.empty()) { *this = ActiveView(); return true; }
-    if (data.size() != 5 && data.size() != 6 && data.size() != 7) return false;
+    if (data.size() != 5 && data.size() != 6 && data.size() != 7 && data.size() != 8) return false;
     for (double x : data) if (!std::isfinite(x)) return false;
     if (data[0] < 1 || data[0] > 1000000 || std::floor(data[0]) != data[0] ||
-        data[3] < 0.6 || data[3] > (data.size() == 7 ? 4.5 : 3.5) || data[4] < 0.15 || data[4] > 3.0)
+        data[3] < 0.6 || data[3] > (data.size() >= 7 ? 4.5 : 3.5) || data[4] < 0.15 || data[4] > 3.0)
       return false;
     if (data.size() == 6 && data[5] != 1.0) return false;
-    if (data.size() == 7 && (data[5] < .6 || data[5] > data[3] ||
+    if (data.size() >= 7 && (data[5] < .6 || data[5] > data[3] ||
         data[6] < data[3] || data[6] > 4.5)) return false;
+    if(data.size()==8 && data[7]!=1.)return false;
     if (id == static_cast<int>(data[0])) return true;  // Freeze this instance.
     id = static_cast<int>(data[0]);
     center = Eigen::Vector2d(data[1], data[2]);
     radius = data[3];
     extent = data[4];
-    framing = data.size() == 7;
+    framing = data.size() >= 7;adaptive=data.size()==8;replans=0;
     minimum_radius = framing ? data[5] : 0.;
     max_radius = framing ? data[6] : radius;
     locked = false;
@@ -84,12 +86,51 @@ public:
     return true;
   }
 
+  bool planAdaptive(const Eigen::Vector2d& start,const Safe& safe,const Safe& clear,
+      const Route& route,std::vector<Eigen::Vector2d>& path)
+  {
+    struct Option {Eigen::Vector2d point;double score;};
+    std::vector<Option> options;
+    std::vector<double> rings={radius};
+    for(double r=minimum_radius+.3125;r<=max_radius+1e-8;r+=.35)
+      if(std::abs(r-radius)>.10)rings.push_back(r);
+    constexpr double pi=3.14159265358979323846;
+    for(double r:rings)for(int k=0;k<32;++k) {
+      Eigen::Vector2d point=center+r*Eigen::Vector2d(std::cos(k*pi/16.),std::sin(k*pi/16.));
+      if((point-start).norm()<.65 || !safe(point) || !visible(point,clear))continue;
+      int free=0;
+      for(int x=-3;x<=3;++x)for(int y=-3;y<=3;++y)
+        if(x*x+y*y<=9 && safe(point+Eigen::Vector2d(x*.1,y*.1)))++free;
+      // Larger framing deficit costs more; a shorter viable partial view can
+      // beat an excessively long detour. Safety is always a hard gate.
+      double deficit=4.*std::max(0.,1.-r/radius);
+      options.push_back({point,deficit+.25*(point-start).norm()-.01*free});
+    }
+    std::stable_sort(options.begin(),options.end(),[](const Option& a,const Option& b){return a.score<b.score;});
+    double best=1e9;int checked=0;std::vector<Eigen::Vector2d> candidate_path,best_path;
+    for(const auto& option:options) {
+      if(++checked>64 || option.score>=best)break;
+      if(!route(option.point,candidate_path) || !safePath(candidate_path,safe))continue;
+      double length=0.;for(size_t i=1;i<candidate_path.size();++i)length+=(candidate_path[i]-candidate_path[i-1]).norm();
+      if(length>8.0)continue; // Reserve the 48-action inspection budget for translation and turns.
+      double score=option.score+.25*(length-(option.point-start).norm());
+      if(score<best){best=score;goal=option.point;best_path=candidate_path;}
+
+    }
+    if(best_path.empty()){path.clear();return false;}
+    locked=true;path=best_path;return true;
+  }
+
   bool plan(const Eigen::Vector2d& start, const Safe& safe, const Safe& clear,
       const Route& route, std::vector<Eigen::Vector2d>& path)
   {
     path.clear();
-    if (locked)
-      return safe(goal) && visible(goal, clear) && route(goal, path) && safePath(path, safe);
+    if (locked) {
+      if(safe(goal) && visible(goal,clear) && route(goal,path) && safePath(path,safe))return true;
+      if(!adaptive || replans>=2)return false;
+      ++replans;locked=false;
+    }
+    if(adaptive)return planAdaptive(start,safe,clear,route,path);
 
     struct Candidate { Eigen::Vector2d point; int ring, free; double distance; };
     std::vector<Candidate> candidates;
