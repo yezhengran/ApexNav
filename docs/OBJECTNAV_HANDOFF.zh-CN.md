@@ -1,11 +1,9 @@
 # ObjectNav 新窗口交接
 
 <!-- Q8_HANDOFF_START -->
-**2026-11-15最新状态：用户退掉并删除Q7；新Q8环带Top-5已实现，尚未开始导航评测。** 当前分支`codex/objectnav-annular-top5`，开关`linked_annular`。全部旧评测／四模型已退出，`objectnav-100`保持PAUSED，禁止恢复任何旧入口。Q7源策略已撤回，26个专用运行／构建／控制／日志／报告路径已删除；37,620个非Q7文件与共享账本哈希保持，账本2.691819/20元，Q7费用不清除。Git发布历史不重写，退役清单`experiment_notes/qwen-annular-top5-20261115/retirement.json`。
+**2026-11-15最新授权：仅Q8前100，清理其他旧实验。** 已保留Q2-full1000/Q2-demo73与全部来源原件，49355文件清理前后哈希一致；其他原始实验输出/控制/日志及旧构建已删除，共约12.75GiB。删除7本地/6远程旧实验分支，当前实验分支仅Q2与Q8，Git历史及基础分支不改。共享账本2.691819元和所有历史预留保留。下方旧实验状态仅历史描述，路径可能已删除，禁止恢复旧入口。
 
-用户确认：每候选严格检测分数Top-5（允许新补拍图未入选）；uncertain／质量不足才补拍，adequate明确rejected排除。首轮原类别融合阈值触发一张最佳crop；无已确认可达替代目标时，规划已知自由环带短弧、采样点朝中心，完毕后全部1–5图联合复查。最新Qwen分数在400步后优先排未确认可达候选，未评分者融合排序后备；400步结束绕行预算，不改分数／原靠近／STOP。盆栽仅adequate且非rejected时>=.60确认，旧Q6数据规则不变。默认关闭独立`--frontier-look`，单独消融，未做本版在线推理。
-
-98项Python、4组C++、独立两包构建、真实Hydra与ROS初始化通过；launch退出0，无导航成绩。新overlay`outputs/build/annular-top5-20261115/install`依赖height/base，无Q7；实际ldd已核对。新批次需用户确定范围后另建多图审计与冻结协议，不能沿用旧单图控制。详见[Q8方案与验证](experiments/2026-11-15-qwen-annular-top5.zh-CN.md)。继承未提交工作保持。以下Q6/Q2状态仅历史，不自动恢复。
+当前Q8分支`codex/objectnav-annular-top5`；独立完整overlay `outputs/build/annular-top5-full-20261115/install`。本批唯一控制目录`experiment_notes/qwen-annular-first100-20261115`，固定HM3Dv2 val全局1–100全部新跑，seed100/500步/step_sync/linked_annular，frontier-look关闭，只保留失败视频。先检查真实进程及protocol/started/round-status/latest-checkpoint/results/comparison，再判断是否启动，禁止重复入口。只读`status.py`。每小时有意义进度更新，同身份对比Q2；完成100后停止模型、独立验收报告并暂停，不扩展。详见[Q8前100协议](experiments/2026-11-15-qwen-annular-first100.zh-CN.md)。
 <!-- Q8_HANDOFF_END -->
 
 **最新复跑结果（2026-11-14 22:58北京）：Q6-plant060-fail6完成6/6，恢复成功3/6（50%），已全部停止。** 用户授权在刚讨论的Q6前100盆栽失败上验证0.60阈值；固定47/54/59/76/90/99，seed100、500步、首个完整结果唯一纳入。47/54/59分别141/114/80步成功；76/90无Qwen调用仍无前沿失败；99在270步Qwen0.70确认后470步受阻失败，评测距离0.9036米。只保留3失败视频共1103帧，6身份/crop/来源/HTTP/源码/旧证据独立验收通过，6次HTTP无重试，14主动观测动作。费用0.006654，账本总1.539652/20元，旧预留保留。运行提交`94a318c`、183源`7906a865…`，同`codex/objectnav-height-aware-viewpoint`分支。输出`outputs/runs/qwen-plant060-fail6-20261114/`，有效记录`experiment_notes/qwen-plant060-fail6-20261114/independent-validation.json`及`comparison.json`。控制器/评测/规划器/四模型均已退出，所有入口不可重跑；没有扩展授权，旧自动跟进继续暂停。原Q6-first100仍78/100，不选择性替换成绩。见[修订与复跑报告](experiments/2026-11-14-qwen-plant060.zh-CN.md)。下方未评测描述是此次真实复跑前的历史状态。

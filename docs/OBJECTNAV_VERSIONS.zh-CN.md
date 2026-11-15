@@ -1,9 +1,9 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q8_VERSIONS_START -->
-**2026-11-15当前开发版Q8：环带观测＋Top-5联合复查，尚未导航评测。** 分支`codex/objectnav-annular-top5`、开关`linked_annular`，原ApexNav/Q2导航骨架＋Q6图像关联／固定视场几何，未采用Q7导航策略。用户确认严格检测Top-5、质量不足或不确定才补拍、清晰否定排除；第二次联合1–5图，400后最新Qwen分数优先靠近，未评分者融合后备。盆栽adequate且非rejected时>=.60确认。`--frontier-look`为独立默认关闭消融。
+**2026-11-15在用实验仅Q2与Q8。** 用户明确清理其他实验数据及分支：Q2-full1000、Q2-demo73完整原件保留；Q8前100全部新跑，以`experiment_notes/qwen-annular-first100-20261115`实时结果为准。其他版本下表仅作历史定义，原始数据/控制目录和旧实验分支已删除，不再可恢复；共享账本不清零、Git历史不重写。
 
-Q7-A/B/C/B2及专用实验已按用户要求删除，不再作为在用版本或可恢复实验；Git既有历史不重写、共享账本费用保留。Q2/Q6证据不动。Q8通过98项Python、4组C++、独立构建与真实初始化，暂无SR。见[完整对齐与验证](experiments/2026-11-15-qwen-annular-top5.zh-CN.md)。下方Q6开发描述均为历史。
+Q8=`linked_annular`，分支`codex/objectnav-annular-top5`：原ApexNav/Q2导航骨架＋Q6关联/固定视场几何，严格检测Top5、单图初审、有界自由环带观测、朝向后联合复查、400后最新Qwen分数优先。前沿朝向本批关闭。Q2前100为78/100、SPL40.6128%；Q8暂无完整100成绩。见[前100协议](experiments/2026-11-15-qwen-annular-first100.zh-CN.md)与[方法对齐](experiments/2026-11-15-qwen-annular-top5.zh-CN.md)。
 <!-- Q8_VERSIONS_END -->
 
 2026-11-14 对齐。此表为今后实验简称的依据；“当前版”“旧版”“提前版”不再单独作为数据标签。分支用于组织开发，**实际实验版本由方法配置、运行源码指纹和固定 episode 集共同确定**。
