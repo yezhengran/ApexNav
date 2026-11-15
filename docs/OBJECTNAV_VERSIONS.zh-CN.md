@@ -1,6 +1,10 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q7_VERSIONS_START -->
+**2026-11-15当前诊断修订Q7-B2（regional_late）已停止。** 数据简称`Q7-B2-fail6`：Q2成功、原B失败的356/367/379/386/389/395，4/6恢复（379/386/389/395），同六例B0/6、Q2为6/6。运行`0b72fae`、188源`db097bdf…`，仍在`codex/objectnav-hierarchical-recovery`；目标相关进展窗口、400步候选优先靠近、软排序差，真实置信度不变。389有同图Qwen分数波动，不能将全部恢复视为纯导航收益。旧B-window实际暂停在350–396共47（41成功），397初始化中断不计失败；所有旧/新入口及小时跟进均停止。见[六例报告](experiments/2026-11-15-qwen-regional-late-fail6.zh-CN.md)。下方350–500启动描述保留为历史。
+
+2026-11-15用户选定**Q7-B（regional）**作为当前方案，C运行代码已撤回，历史`Q7-C-diag15`只保留证据。恢复提交`41f5084`，运行源与原B一致。新批数据简称**Q7-B-window350-500**：151身份新跑，仅失败视频，控制`experiment_notes/qwen-regional-350-500-20261115/`，输出`outputs/runs/qwen-regional-350-500-20261115/`；不混入diag15。Q2完整151对照，Q6-plant060共同126对照，缺失25另列。[协议](experiments/2026-11-15-qwen-regional-350-500.zh-CN.md)。 第367完整失败在独立终止STOP边界审计通过后只纳入一次；实时控制已切至`experiment_notes/qwen-regional-350-500-20261115/continue-0368-20261115/`，从368继续，原控制failed/17保留。
+
 **2026-11-15新增Q7阶段登记，以下Q6开发状态属于历史。** 同一新分支`codex/objectnav-hierarchical-recovery`；各阶段按运行提交/源码指纹区分，不能仅以最终分支HEAD替代历史版本。
 
 | 简称 | 累加机制与运行开关 | 运行提交 | 固定诊断集结果 |
