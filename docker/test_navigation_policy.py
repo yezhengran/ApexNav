@@ -26,4 +26,11 @@ class RegionalPolicy(unittest.TestCase):
   self.assertEqual([s for s in b if not s.startswith('+navigation_profile=')],a)
   self.assertIn('+navigation_profile=regional',b)
   self.assertIn('+active_view.qwen_plant_confirm_threshold=0.6',b)
+class LatePolicy(unittest.TestCase):
+ def test_late_changes_only_navigation_profile(self):
+  base=dict(method='selected_review',step_sync=True,review_profile='linked_framing',review_backend='qwen',uncertain_after_steps=400)
+  old=M.evaluation_command('hm3dv2',1,'out',True,**base,navigation_profile='regional')
+  new=M.evaluation_command('hm3dv2',1,'out',True,**base,navigation_profile='regional_late')
+  self.assertEqual([x for x in old if not x.startswith('+navigation_profile=')],[x for x in new if not x.startswith('+navigation_profile=')])
+  self.assertIn('+navigation_profile=regional_late',new)
 if __name__=='__main__':unittest.main()

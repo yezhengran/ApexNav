@@ -108,7 +108,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
   bool step_sync_ = false;
-  bool stable_navigation_ = false, regional_navigation_ = false;
+  bool stable_navigation_ = false, regional_navigation_ = false, late_navigation_ = false;
   int regional_scan_until_ = -1;
   bool recovery_active_ = false, recovery_has_goal_ = false;
   int recovery_started_ = 0;

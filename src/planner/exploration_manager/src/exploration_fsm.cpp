@@ -19,6 +19,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
     node_->declare_parameter("navigation.step_sync", false);
     node_->declare_parameter("navigation.stable", false);
     node_->declare_parameter("navigation.regional", false);
+    node_->declare_parameter("navigation.late_approach", false);
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
@@ -32,6 +33,8 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_->get_parameter("navigation.step_sync", step_sync_);
   node_->get_parameter("navigation.stable", stable_navigation_);
   node_->get_parameter("navigation.regional", regional_navigation_);
+  node_->get_parameter("navigation.late_approach", late_navigation_);
+  if(late_navigation_ && !regional_navigation_)throw std::invalid_argument("Late approach requires regional navigation");
   if(regional_navigation_ && !stable_navigation_)throw std::invalid_argument("Regional navigation requires stable execution");
   regional_scan_until_=-1;
   if (stable_navigation_ && !step_sync_)
@@ -81,6 +84,8 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   expl_manager_->initialize(node_);
   expl_manager_->stable_navigation_=stable_navigation_;
   expl_manager_->regional_navigation_=regional_navigation_;
+  expl_manager_->late_navigation_=late_navigation_;
+  expl_manager_->navigation_.scoped_progress=late_navigation_;
   expl_manager_->object_map2d_->stop_review_gating_ = review_stop_;
   expl_manager_->object_map2d_->fused_review_gating_ = review_fused_;
   expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
@@ -641,6 +646,10 @@ int ExplorationFSM::callActionPlanner()
     return final_res;
   }
 
+  // Bind progress to the newly chosen intent before its first real action.
+  if(late_navigation_) expl_manager_->navigation_.beginGoal(
+      final_res==FINAL_RESULT::SEARCH_OBJECT ? expl_manager_->ed_->selected_object_id_ : -2, end_pos);
+
   // Plan specific action based on exploration result
   if (expl_res == EXPL_RESULT::SEARCH_EXTREME)
     fd_->newest_action_ =
@@ -659,6 +668,9 @@ bool ExplorationFSM::monitoredRecovery(const Vector2d& current, const Vector2d& 
       (current-previous).norm()<0.05;
   if(blocked && memory.last_step!=review_step_)
     memory.failEdge(current,Vector2d(std::cos(fd_->start_yaw_(0)),std::sin(fd_->start_yaw_(0))),review_step_);
+  if(late_navigation_) memory.beginGoal(recovery_active_ ? -3 :
+      (fd_->final_result_==FINAL_RESULT::SEARCH_OBJECT ? expl_manager_->ed_->selected_object_id_ : -2),
+      expl_manager_->ed_->next_pos_);
   const int reason=memory.observe(review_step_,current,expl_manager_->ed_->next_pos_,blocked);
   auto map=expl_manager_->sdf_map_;
   auto safe=[map](const Vector2d& p){return map->isInMap(p) &&

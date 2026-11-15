@@ -129,6 +129,7 @@ public:
   double navigationRank(const ObjectCluster& object) const;
   void logCandidateScores(uint32_t step) const;
   bool reviewEligible(int object_id, bool require_confidence = true) const;
+  bool lateApproachEligible(int object_id) const;
   int reviewState(int object_id) const;
   bool setReviewState(int object_id, int state, bool preserve_stop = false);
   bool reviewInfo(int object_id, vector<double>& data) const;

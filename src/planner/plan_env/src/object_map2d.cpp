@@ -755,6 +755,16 @@ bool ObjectMap2D::reviewEligible(int object_id, bool require_confidence) const
       (!require_confidence || object.confidence_scores_[0] >= min_confidence_);
 }
 
+bool ObjectMap2D::lateApproachEligible(int object_id) const
+{
+  if (object_id < 0 || object_id >= static_cast<int>(objects_.size()) ||
+      reviewState(object_id) == REJECTED) return false;
+  const auto& object = objects_[object_id];
+  // Late approach is a navigation hypothesis, never a semantic confirmation.
+  return !object.good_cells_.empty() && object.observation_nums_[0] >= min_observation_num_ &&
+      std::isfinite(object.confidence_scores_[0]) && object.confidence_scores_[0] > 0.01;
+}
+
 bool ObjectMap2D::isConfidenceObject(const ObjectCluster& obj)
 {
   if (obj.confidence_scores_[0] >= min_confidence_ &&

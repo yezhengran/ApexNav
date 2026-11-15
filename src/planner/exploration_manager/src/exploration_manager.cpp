@@ -151,10 +151,14 @@ bool ExplorationManager::tryStableObjects(const Vector3d& pos,
   if (stable_navigation_ && !ids.empty()) {
     auto current=std::find(ids.begin(),ids.end(),navigation_.selected);
     if(current!=ids.end() && !navigation_.cooling(*current,navigation_step_) &&
-        NavigationMemory::keepTarget(navigation_step_-navigation_.selected_at,
+        (late_navigation_ ? NavigationMemory::keepPriority(
           candidateRank(*current),candidateRank(ids.front()),
           object_map2d_->reviewState(*current)==ObjectMap2D::CONFIRMED,
-          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED)) {
+          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED) :
+         NavigationMemory::keepTarget(navigation_step_-navigation_.selected_at,
+          candidateRank(*current),candidateRank(ids.front()),
+          object_map2d_->reviewState(*current)==ObjectMap2D::CONFIRMED,
+          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED))) {
       const size_t index=std::distance(ids.begin(),current);
       std::rotate(ids.begin(),ids.begin()+index,ids.begin()+index+1);
       std::rotate(clouds.begin(),clouds.begin()+index,clouds.begin()+index+1);
@@ -177,7 +181,31 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
   vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> object_clouds;
   vector<int> object_ids;
   ed_->selected_object_id_ = -1;
-  sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, true, false, &object_ids);
+  if (late_navigation_ && navigation_step_ >= 400) {
+    object_map2d_->getTopConfidenceObjectCloud(object_clouds, false, false, &object_ids);
+    vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> eligible;
+    vector<int> ids;
+    // Keep confirmed targets first; rank all other hypotheses together, without
+    // changing fusion/Qwen scores or the original arrival/collision checks.
+    for (bool confirmed : {true, false}) for (size_t i=0;i<object_ids.size();++i) {
+      const int id=object_ids[i];
+      if ((object_map2d_->reviewState(id)==ObjectMap2D::CONFIRMED)!=confirmed ||
+          !object_map2d_->lateApproachEligible(id)) continue;
+      eligible.push_back(object_clouds[i]); ids.push_back(id);
+      RCLCPP_INFO(node_->get_logger(),"[Late approach candidate] step=%d id=%d rank=%.9f confirmed=%d cooling=%d",
+          navigation_step_,id+1,candidateRank(id),int(confirmed),int(navigation_.cooling(id,navigation_step_)));
+    }
+    if (tryStableObjects(pos,eligible,ids)) {
+      RCLCPP_INFO(node_->get_logger(),"[Late approach selected] step=%d id=%d",
+          navigation_step_,ed_->selected_object_id_+1);
+      return SEARCH_SUSPICIOUS_OBJECT;
+    }
+    RCLCPP_INFO(node_->get_logger(),"[Late approach unavailable] step=%d eligible=%zu; exploration fallback",
+        navigation_step_,ids.size());
+    object_clouds.clear();object_ids.clear();
+  } else {
+    sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, true, false, &object_ids);
+  }
 
   // ==================== Navigation Mode: High-Confidence Objects ====================
   if (!object_clouds.empty()) {

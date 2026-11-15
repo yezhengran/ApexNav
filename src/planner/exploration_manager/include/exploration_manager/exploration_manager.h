@@ -95,7 +95,7 @@ public:
   shared_ptr<KinoAstar> kinoastar_;           ///< Kinodynamic A* planner (for real-world)
 
   int reachableConfirmedTarget(const Vector3d& start);
-  bool stable_navigation_ = false, regional_navigation_ = false;
+  bool stable_navigation_ = false, regional_navigation_ = false, late_navigation_ = false;
   RegionMemory regions_;
   int navigation_step_ = 0;
   NavigationMemory navigation_;

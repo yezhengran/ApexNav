@@ -19,6 +19,7 @@ def generate_launch_description():
 
     navigation_stable_arg = DeclareLaunchArgument('navigation_stable', default_value='false')
     navigation_regional_arg = DeclareLaunchArgument('navigation_regional', default_value='false')
+    navigation_late_arg = DeclareLaunchArgument('navigation_late', default_value='false')
     step_sync_arg = DeclareLaunchArgument('step_sync', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
     review_automatic_arg = DeclareLaunchArgument('review_automatic', default_value='false')
@@ -86,6 +87,7 @@ def generate_launch_description():
             'is_real_world_': LaunchConfiguration('is_real_world'),
             'navigation_stable_': LaunchConfiguration('navigation_stable'),
             'navigation_regional_': LaunchConfiguration('navigation_regional'),
+            'navigation_late_': LaunchConfiguration('navigation_late'),
             'step_sync_': LaunchConfiguration('step_sync'),
             'review_enabled_': LaunchConfiguration('review_enabled'),
             'review_automatic_': LaunchConfiguration('review_automatic'),
@@ -114,6 +116,7 @@ def generate_launch_description():
         is_real_world_arg,
         navigation_stable_arg,
         navigation_regional_arg,
+        navigation_late_arg,
         step_sync_arg,
         review_enabled_arg,
         review_automatic_arg,

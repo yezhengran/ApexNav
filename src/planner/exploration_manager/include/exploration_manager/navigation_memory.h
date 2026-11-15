@@ -25,6 +25,25 @@ public:
   std::deque<Sample> window;
   std::set<std::pair<int,int>> visited;
   int last_step = -1, recovery_count = 0;
+  bool scoped_progress = false, progress_goal_valid = false;
+  int progress_scope = -1;
+  Point progress_goal = Point::Zero();
+
+  // A progress window belongs to one navigation intent, not the whole episode.
+  // Keep collision edges and visited cells across intents; discard only distances.
+  void beginGoal(int scope, const Point& point) {
+    if (!scoped_progress) return;
+    if (!progress_goal_valid || scope != progress_scope ||
+        (point-progress_goal).norm() > 0.75) {
+      window.clear();
+      progress_scope = scope; progress_goal = point; progress_goal_valid = true;
+    }
+  }
+  static bool keepPriority(double current_score, double challenger_score,
+      bool current_confirmed, bool challenger_confirmed) {
+    if (current_confirmed != challenger_confirmed) return current_confirmed;
+    return challenger_score < current_score + 0.08;
+  }
 
   bool cooling(int id, int step) const {
     auto it = cooldown_until.find(id);
@@ -36,12 +55,13 @@ public:
     return age < 24 || challenger_score < current_score + 0.08;
   }
   void commit(int id, const Point& point, int step) {
+    beginGoal(id, point);
     if (selected != id) selected_at = step;
     selected = id; goal = point; has_goal = true;
   }
   void abandon(int step) {
     if (selected >= 0) cooldown_until[selected] = step + 60;
-    selected = -1; has_goal = false; window.clear();
+    selected = -1; has_goal = false; window.clear(); progress_goal_valid = false;
   }
   void failEdge(const Point& start, const Point& direction, int step) {
     if (!start.allFinite() || !direction.allFinite() || direction.norm() < 1e-6) return;
@@ -74,10 +94,11 @@ public:
       blocks+=window[i].blocked;new_cells+=window[i].novel;
       if(i) motion+=(window[i].position-window[i-1].position).norm();
     }
+    const Point reference = scoped_progress && progress_goal_valid ? progress_goal : target;
     double early_best=1e9,recent_best=1e9;
     for(size_t i=0;i<6;++i) {
-      early_best=std::min(early_best,(window[i].position-target).norm());
-      recent_best=std::min(recent_best,(window[window.size()-1-i].position-target).norm());
+      early_best=std::min(early_best,(window[i].position-reference).norm());
+      recent_best=std::min(recent_best,(window[window.size()-1-i].position-reference).norm());
     }
     const double progress=early_best-recent_best;
     if (blocks>=4 && progress<0.25 && new_cells<=2) return 1;
