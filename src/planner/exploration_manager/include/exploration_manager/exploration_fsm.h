@@ -108,6 +108,11 @@ private:
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
   bool step_sync_ = false;
+  bool stable_navigation_ = false;
+  bool recovery_active_ = false, recovery_has_goal_ = false;
+  int recovery_started_ = 0;
+  Vector2d recovery_goal_ = Vector2d::Zero();
+  bool monitoredRecovery(const Vector2d& current, const Vector2d& previous);
   ObservationSequence observation_sequence_;
   rclcpp::Service<plan_env::srv::ApplyObservation>::SharedPtr observation_service_;
   bool review_enabled_ = false, review_replan_ = false, review_lineage_ = false;

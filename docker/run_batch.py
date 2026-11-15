@@ -43,7 +43,7 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
                        uncertain_after_steps=350, episode_index=-1, review_profile="legacy",
                        review_backend="blip2", qwen_budget_ledger="", failure_videos=False, step_sync=False,
-                       early_review_threshold=0.65):
+                       early_review_threshold=0.65, navigation_profile="legacy"):
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         f"test_epi_num={episode_index}", f"+max_episodes={episodes}",
@@ -53,6 +53,8 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
     ]
     if step_sync:
         command.append("+navigation_step_sync=true")
+    if navigation_profile != 'legacy':
+        command.append(f'+navigation_profile={navigation_profile}')
     if method != "baseline":
         command.extend([f"active_view.mode={method}",
                         f"active_view.itm_confirm_threshold={confirm_threshold}",
@@ -222,6 +224,8 @@ def main():
     parser.add_argument("--episode-index", type=int, default=-1,
                         help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
+    parser.add_argument('--navigation-profile', choices=['legacy', 'stable'], default='legacy',
+                        help='Opt-in staged navigation; never changes legacy profiles')
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
@@ -237,6 +241,8 @@ def main():
     parser.add_argument("--reject-threshold", type=float, default=0.20)
     parser.add_argument("--uncertain-after-steps", type=int, default=350)
     args = parser.parse_args()
+    if args.navigation_profile != 'legacy' and (not args.step_sync or args.review_profile != 'linked_framing'):
+        parser.error('Stable navigation requires step-sync / linked_framing')
     if args.network_episode_retries and args.review_backend != 'qwen':
         parser.error('--network-episode-retries requires Qwen')
     if args.failure_videos:
@@ -293,7 +299,7 @@ def main():
                                  args.reject_threshold, args.uncertain_after_steps,
                                  args.episode_index, args.review_profile,
                                  args.review_backend, args.qwen_budget_ledger, args.failure_videos, args.step_sync,
-                                 args.early_review_threshold)
+                                 args.early_review_threshold, args.navigation_profile)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -339,6 +345,11 @@ def main():
                 'comparison': '>=', 'overrides_raw_decision_and_quality': True,
                 'below_threshold': 'never_confirm; preserve_existing_rejection_rules',
                 'other_targets': 'unchanged_structured_decision_and_quality'}
+    if args.navigation_profile != 'legacy':
+        spec['navigation_profile'] = args.navigation_profile
+        spec['navigation_policy'] = {'target_margin': .08, 'minimum_commit_steps': 24,
+            'progress_window': 24, 'candidate_cooldown_steps': 60,
+            'failed_edge_steps': 40, 'recovery_actions': 16, 'max_recoveries': 4}
     if args.step_sync:
         spec["navigation_step_sync"] = True
     if args.failure_videos:
@@ -443,6 +454,7 @@ def main():
                              f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
+                             *(['navigation_stable:=true'] if args.navigation_profile != 'legacy' else []),
                              *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing') else []),
                              *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing') else []),
                              *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing') else [])],

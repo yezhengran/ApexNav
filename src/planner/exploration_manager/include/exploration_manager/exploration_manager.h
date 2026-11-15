@@ -3,6 +3,7 @@
 
 // Third-party libraries
 #include <Eigen/Eigen>
+#include <exploration_manager/navigation_memory.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -93,6 +94,14 @@ public:
   shared_ptr<KinoAstar> kinoastar_;           ///< Kinodynamic A* planner (for real-world)
 
   int reachableConfirmedTarget(const Vector3d& start);
+  bool stable_navigation_ = false;
+  int navigation_step_ = 0;
+  NavigationMemory navigation_;
+  bool tryStableObjects(const Vector3d& pos,
+      vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> clouds, vector<int> ids);
+  bool tryStableObject(const Vector3d& pos,
+      const pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& cloud, int id);
+  double candidateRank(int id) const;
 
   typedef shared_ptr<ExplorationManager> Ptr;
 

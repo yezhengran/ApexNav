@@ -17,6 +17,7 @@ def generate_launch_description():
     # Get package share directory
     exploration_manager_share = get_package_share_directory('exploration_manager')
 
+    navigation_stable_arg = DeclareLaunchArgument('navigation_stable', default_value='false')
     step_sync_arg = DeclareLaunchArgument('step_sync', default_value='false')
     review_enabled_arg = DeclareLaunchArgument('review_enabled', default_value='false')
     review_automatic_arg = DeclareLaunchArgument('review_automatic', default_value='false')
@@ -82,6 +83,7 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'is_real_world_': LaunchConfiguration('is_real_world'),
+            'navigation_stable_': LaunchConfiguration('navigation_stable'),
             'step_sync_': LaunchConfiguration('step_sync'),
             'review_enabled_': LaunchConfiguration('review_enabled'),
             'review_automatic_': LaunchConfiguration('review_automatic'),
@@ -108,6 +110,7 @@ def generate_launch_description():
         map_size_x_arg,
         map_size_y_arg,
         is_real_world_arg,
+        navigation_stable_arg,
         step_sync_arg,
         review_enabled_arg,
         review_automatic_arg,

@@ -15,6 +15,7 @@
 #include <path_searching/kino_astar.h>
 #include <trajectory_manager/optimizer.h>
 #include <cmath>
+#include <plan_env/review_rank.h>
 
 using namespace Eigen;
 
@@ -91,13 +92,76 @@ int ExplorationManager::reachableConfirmedTarget(const Vector3d& start)
   vector<int> ids;
   object_map2d_->getTopConfidenceObjectCloud(clouds, true, false, &ids);
   for (size_t i = 0; i < ids.size(); ++i) {
-    if (object_map2d_->reviewState(ids[i]) != ObjectMap2D::CONFIRMED ||
+    if ((stable_navigation_ && navigation_.cooling(ids[i],navigation_step_)) ||
+        object_map2d_->reviewState(ids[i]) != ObjectMap2D::CONFIRMED ||
         !object_map2d_->reviewEligible(ids[i], false)) continue;
     Vector2d goal;
     vector<Vector2d> path;
     if (searchObjectPath(start, clouds[i], goal, path)) return ids[i];
   }
   return -1;
+}
+
+double ExplorationManager::candidateRank(int id) const
+{
+  vector<double> info;
+  if (!object_map2d_->reviewInfo(id,info)) return -1.;
+  auto q=object_map2d_->qwen_confidences_.find(id);
+  return reviewRank(info[1],object_map2d_->confidence_review_,navigation_step_>=400,
+      object_map2d_->reviewState(id),q!=object_map2d_->qwen_confidences_.end(),
+      q!=object_map2d_->qwen_confidences_.end()?q->second:0.);
+}
+
+bool ExplorationManager::tryStableObject(const Vector3d& pos,
+    const pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& cloud, int id)
+{
+  if (stable_navigation_ && navigation_.cooling(id,navigation_step_)) return false;
+  const Vector2d start=pos.head<2>();
+  if (stable_navigation_ && navigation_.selected==id && navigation_.has_goal) {
+    double object_distance=1e9;
+    for (const auto& p:cloud->points)
+      object_distance=std::min(object_distance,(Vector2d(p.x,p.y)-navigation_.goal).norm());
+    const auto& goal=navigation_.goal;
+    if (object_distance<=1.2 && sdf_map_->isInMap(goal) &&
+        sdf_map_->getOccupancy(goal)==SDFMap2D::FREE && sdf_map_->getInflateOccupancy(goal)!=1) {
+      path_finder_->reset();
+      if (path_finder_->astarSearch(start,goal,0.2,0.2)==Astar2D::REACH_END) {
+        ed_->next_pos_=goal;ed_->next_best_path_=path_finder_->getPath();
+        ed_->selected_object_id_=id;
+        RCLCPP_INFO(node_->get_logger(),"[Navigation hold] step=%d id=%d goal=(%.3f,%.3f)",
+            navigation_step_,id+1,goal.x(),goal.y());
+        return true;
+      }
+    }
+  }
+  if (!searchObjectPath(pos,cloud,ed_->next_pos_,ed_->next_best_path_)) return false;
+  ed_->selected_object_id_=id;
+  if (stable_navigation_) {
+    RCLCPP_INFO(node_->get_logger(),"[Navigation select] step=%d previous=%d id=%d goal=(%.3f,%.3f)",
+        navigation_step_,navigation_.selected+1,id+1,ed_->next_pos_.x(),ed_->next_pos_.y());
+    navigation_.commit(id,ed_->next_pos_,navigation_step_);
+  }
+  return true;
+}
+
+bool ExplorationManager::tryStableObjects(const Vector3d& pos,
+    vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> clouds, vector<int> ids)
+{
+  if (stable_navigation_ && !ids.empty()) {
+    auto current=std::find(ids.begin(),ids.end(),navigation_.selected);
+    if(current!=ids.end() && !navigation_.cooling(*current,navigation_step_) &&
+        NavigationMemory::keepTarget(navigation_step_-navigation_.selected_at,
+          candidateRank(*current),candidateRank(ids.front()),
+          object_map2d_->reviewState(*current)==ObjectMap2D::CONFIRMED,
+          object_map2d_->reviewState(ids.front())==ObjectMap2D::CONFIRMED)) {
+      const size_t index=std::distance(ids.begin(),current);
+      std::rotate(ids.begin(),ids.begin()+index,ids.begin()+index+1);
+      std::rotate(clouds.begin(),clouds.begin()+index,clouds.begin()+index+1);
+    }
+  }
+  for(size_t i=0;i<ids.size();++i)
+    if(tryStableObject(pos,clouds[i],ids[i])) return true;
+  return false;
 }
 
 int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw)
@@ -119,12 +183,7 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
     RCLCPP_WARN(node_->get_logger(), "[Navigation Mode] Get object_cloud num = %ld", object_clouds.size());
 
     // Try to find path to each detected object in order of confidence
-    for (size_t i = 0; i < object_clouds.size(); ++i) {
-      if (searchObjectPath(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
-        ed_->selected_object_id_ = object_ids[i];
-        return SEARCH_BEST_OBJECT;
-      }
-    }
+    if (tryStableObjects(pos,object_clouds,object_ids)) return SEARCH_BEST_OBJECT;
   }
 
   // ==================== Navigation Mode: Over-Depth Objects ====================
@@ -155,9 +214,10 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
     RCLCPP_WARN(node_->get_logger(), "Maybe no passable frontier.");
 
     // Try suspicious objects as backup
-    if (!top_object_cloud->points.empty() &&
-        searchObjectPath(pos, top_object_cloud, ed_->next_pos_, ed_->next_best_path_)) {
-      ed_->selected_object_id_ = top_object_id;
+    if ((!stable_navigation_ && !top_object_cloud->points.empty() &&
+         searchObjectPath(pos, top_object_cloud, ed_->next_pos_, ed_->next_best_path_)) ||
+        (stable_navigation_ && tryStableObjects(pos,object_clouds,object_ids))) {
+      if (!stable_navigation_) ed_->selected_object_id_ = top_object_id;
       return SEARCH_SUSPICIOUS_OBJECT;
     }
     else
@@ -171,7 +231,8 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
 
       // Try extreme object search with relaxed constraints
       for (size_t i = 0; i < object_clouds.size(); ++i) {
-        if (!object_clouds[i]->points.empty() &&
+        if ((!stable_navigation_ || !navigation_.cooling(object_ids[i],navigation_step_)) &&
+            !object_clouds[i]->points.empty() &&
             searchObjectPathExtreme(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
           ed_->selected_object_id_ = object_ids[i];
           return SEARCH_EXTREME;
@@ -181,7 +242,8 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
       // Include lower confidence objects in extreme search
       sdf_map_->object_map2d_->getTopConfidenceObjectCloud(object_clouds, false, true, &object_ids);
       for (size_t i = 0; i < object_clouds.size(); ++i) {
-        if (!object_clouds[i]->points.empty() &&
+        if ((!stable_navigation_ || !navigation_.cooling(object_ids[i],navigation_step_)) &&
+            !object_clouds[i]->points.empty() &&
             searchObjectPathExtreme(pos, object_clouds[i], ed_->next_pos_, ed_->next_best_path_)) {
           ed_->selected_object_id_ = object_ids[i];
           return SEARCH_EXTREME;
