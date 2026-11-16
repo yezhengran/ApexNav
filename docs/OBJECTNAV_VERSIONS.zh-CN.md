@@ -1,6 +1,8 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q8_VERSIONS_START -->
+**2026-11-16 Q8-C2-semantic-first100全部完成并独立验收：81/100、SR81%、SPL41.5682%、SoftSPL42.7835%。** 同身份Q2为78成功（新增51／69／74，无退化），原Q8为80成功（新增37／74、退化84）；相对原Q8 SPL降低1.6752个百分点，不称纯提示词消融或完整1000泛化提升。运行HEAD83bdff9b、203源f5fa79fc92c6…、641构建与62,353旧文件保持；19失败视频4584帧独立解码、204单次HTTP含9比较、41联合复核136图、522观测动作，0网络恢复。新增0.262606元，账本3.485233/20；所有控制／评测／规划器／四模型退出。结果、独立验收和delivery视频索引在experiment_notes/qwen-semantic-first100-20261116/；见[最终报告](experiments/2026-11-16-qwen-semantic-first100.zh-CN.md)。最终交付后暂停objectnav-100等待用户，不重复入口或扩展101以后。下方启动状态仅历史。
+
 **2026-11-16最新用户授权：用semantic_guard_v1全新运行前100回合。** 方法Q8-C2-semantic-v1，固定HM3Dv2 val1–100、seed100／500步／step_sync／linked_choice，三个C2开关开启、frontier-look关闭，精确同两例诊断203源f5fa79fc92c6…和641完整构建。只失败视频，旧结果不回填，原Q2同100为78成功、原Q8为80成功，逐例同身份配对；这不是纯提示词消融。新唯一控制experiment_notes/qwen-semantic-first100-20261116/launch.sh，日志outputs/runtime/qwen-semantic-first100-20261116-launcher.log，started及原锁保护；实际启动／进度以新目录状态和进程为准，不重复任何旧入口。11调度检查、首尾真实配置及62,353旧文件预检通过；账本起点3.222627/20。运行中不改源码配置HEAD，沿用每1h跟踪，完成100独立验收并交付后再暂停。见[本批协议](experiments/2026-11-16-qwen-semantic-first100.zh-CN.md)。下方已完成／暂停描述仅历史。
 
 **2026-11-16 Q8-C2-semantic-v1两例已完成并独立验收：432成功、446仍失败（1/2）。** 运行提交3f3dce98（同分支已push），203源f5fa79fc92c6…；只启用semantic_guard_v1，原导航／STOP不变。相同首图下432确认0.95→不确定0.40，122步成功／0.0345米、39观测动作；446确认0.85→不确定0.60，46步失败／3.1568米、9观测动作。8单次HTTP、3联合复查11图、0比较调用／网络恢复；新增0.011814元，账本3.222627。仅446失败视频47帧，全部来源与62,191旧文件核验通过。两例都是couch，TV与候选比较新提示词未在线触发验证；不回填原100（仍74/100）、不称总体提升。控制器／导航／四模型已退出，最终交付后暂停objectnav-100等待用户；禁止重跑任何入口。独立证据与delivery在experiment_notes/qwen-semantic-prompt-diagnostic2-20261116，见[最终报告](experiments/2026-11-16-qwen-semantic-prompt.zh-CN.md)。下方准备／启动文字仅历史。
