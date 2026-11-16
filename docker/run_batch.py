@@ -43,7 +43,11 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
                        uncertain_after_steps=350, episode_index=-1, review_profile="legacy",
                        review_backend="blip2", qwen_budget_ledger="", failure_videos=False, step_sync=False,
-                       early_review_threshold=0.65):
+                       early_review_threshold=0.65, qwen_prompt_policy="legacy"):
+    if qwen_prompt_policy not in ("legacy", "semantic_guard_v1"):
+        raise ValueError("Unknown Qwen prompt policy")
+    if qwen_prompt_policy != "legacy" and (review_backend != "qwen" or method != "selected_review"):
+        raise ValueError("Qwen prompt policy requires selected_review with Qwen")
     command = [
         sys.executable, "-u", "habitat_evaluation.py", "--dataset", dataset,
         f"test_epi_num={episode_index}", f"+max_episodes={episodes}",
@@ -83,6 +87,8 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_backend == 'qwen':
             command.extend(['active_view.backend=qwen',
                             f'active_view.qwen_budget_ledger={qwen_budget_ledger}'])
+            if qwen_prompt_policy != 'legacy':
+                command.append(f'+active_view.qwen_prompt_policy={qwen_prompt_policy}')
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     if failure_videos:
@@ -244,11 +250,15 @@ def main():
                         help='linked_early only: single-frame target detector score, default 0.65')
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
     parser.add_argument('--review-backend', choices=['blip2', 'qwen'], default='blip2')
+    parser.add_argument('--qwen-prompt-policy', choices=['legacy', 'semantic_guard_v1'], default='legacy',
+                        help='Explicit semantic ambiguity guidance; legacy prompts remain unchanged')
     parser.add_argument('--qwen-budget-ledger', default='',
                         help='Shared initialized local JSON ledger; never contains credentials')
     parser.add_argument("--reject-threshold", type=float, default=0.20)
     parser.add_argument("--uncertain-after-steps", type=int, default=350)
     args = parser.parse_args()
+    if args.qwen_prompt_policy != 'legacy' and (args.review_backend != 'qwen' or args.method != 'selected_review'):
+        parser.error('--qwen-prompt-policy requires selected_review with Qwen')
     if args.network_episode_retries and args.review_backend != 'qwen':
         parser.error('--network-episode-retries requires Qwen')
     if args.failure_videos:
@@ -311,7 +321,7 @@ def main():
                                  args.reject_threshold, args.uncertain_after_steps,
                                  args.episode_index, args.review_profile,
                                  args.review_backend, args.qwen_budget_ledger, args.failure_videos, args.step_sync,
-                                 args.early_review_threshold)
+                                 args.early_review_threshold, args.qwen_prompt_policy)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -325,6 +335,8 @@ def main():
                               'decision': 'structured three-way; no ITM thresholds',
                               'budget_ledger': args.qwen_budget_ledger,
                               'uncertain_after_steps': args.uncertain_after_steps}
+            if args.qwen_prompt_policy != 'legacy':
+                spec['review']['prompt_policy'] = args.qwen_prompt_policy
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
     if args.episode_index >= 0:

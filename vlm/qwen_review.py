@@ -62,6 +62,74 @@ CHOICE_PROMPT = (
 )
 
 
+PROMPT_POLICIES = ('legacy', 'semantic_guard_v1')
+SEATING_REVIEW_GUIDANCE = (
+    'Use conservative category boundaries for chair and couch. A standalone, plush '
+    'upholstered single-person seat, armchair, recliner, or single-seat sofa is ambiguous '
+    'between these categories for this task: return uncertain rather than confirming it as '
+    'either category. Do not broaden couch to include an armchair just because it is '
+    'upholstered or has a tufted back, armrests, cushions, or a skirt. Prefer visible '
+    'evidence of a continuous seat and backrest extending across multiple seating positions '
+    'when confirming couch; do not infer unseen width or count cropped cushions as proof of '
+    'seat count. A close crop may hide the rest of a genuine sofa, so a partial sofa-like '
+    'shape is uncertain, not automatically rejected or labeled a standalone chair. Ordinary '
+    'clearly identifiable chairs outside this upholstered single-seat ambiguity retain the '
+    'normal decision rules. A sharp image may still have ambiguous category identity: quality '
+    'can be adequate while decision is uncertain. Reflect the unresolved category ambiguity '
+    'in target_confidence and briefly state the ambiguity.'
+)
+
+TV_REVIEW_GUIDANCE = (
+    'Distinguish a physical television or monitor from framed artwork, a picture, a poster, a '
+    'mirror, or a window. A rectangular outline, dark border, wall mounting, or a '
+    'picture-like surface alone is not enough to confirm TV. Use visible display hardware or '
+    'screen-specific evidence, such as a bezel and panel structure, stand, controls, connections, or '
+    'screen surface; no single cue is mandatory. A switched-off screen can still be a TV, and '
+    'a TV can display art, so neither darkness nor painted-looking content alone decides the '
+    'category. If the available crop or views cannot distinguish a physical display from '
+    'artwork, return uncertain and reflect that ambiguity in target_confidence. Reject only '
+    'when the visible evidence clearly establishes a different object. Do not infer dataset '
+    'instance membership or navigation success.'
+)
+
+SEATING_CHOICE_GUIDANCE = (
+    'Prefer candidates with clear evidence for the requested category over ambiguous '
+    'standalone upholstered single-person seats, armchairs, recliners, or single-seat sofas. '
+    'For couch, a clearly visible multi-seat sofa is stronger evidence than an armchair-like '
+    'object or an isolated cropped seat. For chair, prefer clearly identifiable chairs over '
+    'the ambiguous plush single-seat category. Do not select an obviously wrong-category '
+    'object merely to avoid an ambiguous candidate. A tightly cropped part of a sofa is not '
+    'evidence that the whole object is single-seat. If every candidate remains ambiguous, '
+    'still select the best-supported candidate and mention the uncertainty briefly; selection '
+    'does not confirm its category.'
+)
+
+TV_CHOICE_GUIDANCE = (
+    'Prefer candidates showing identifiable physical display hardware over wall rectangles '
+    'that could be framed artwork, posters, mirrors, or windows. Do not rank a screen lower '
+    'only because it is off or displaying art. If every candidate remains ambiguous, still '
+    'select the best-supported candidate and briefly state the ambiguity; this relative '
+    'selection is not a TV confirmation.'
+)
+
+def build_prompt(target, *, target_confidence=False, multiview=False, count=1,
+                 candidate_ids=None, policy='legacy'):
+    """Keep legacy bytes stable; semantic guidance changes only requested categories."""
+    if policy not in PROMPT_POLICIES:
+        raise ValueError('Unknown Qwen prompt policy')
+    if candidate_ids is not None:
+        prompt = CHOICE_PROMPT.format(target=target, ids=candidate_ids)
+    else:
+        template = MULTIVIEW_PROMPT if multiview else (CONFIDENCE_PROMPT if target_confidence else PROMPT)
+        prompt = template.format(target=target, count=count)
+    if policy == 'semantic_guard_v1':
+        if target in ('chair', 'couch'):
+            prompt += ' ' + (SEATING_CHOICE_GUIDANCE if candidate_ids is not None else SEATING_REVIEW_GUIDANCE)
+        elif target == 'tv':
+            prompt += ' ' + (TV_CHOICE_GUIDANCE if candidate_ids is not None else TV_REVIEW_GUIDANCE)
+    return prompt
+
+
 def parse_choice(data, ids):
     choice = data['choices'][0]
     if choice['finish_reason'] != 'stop':
@@ -188,7 +256,10 @@ class QwenTransportError(RuntimeError):
 
 class QwenReviewer:
     def __init__(self, ledger, model=MODEL, target_confidence=False,
-                 plant_confirm_threshold=None):
+                 plant_confirm_threshold=None, prompt_policy='legacy'):
+        if prompt_policy not in PROMPT_POLICIES:
+            raise ValueError('Unknown Qwen prompt policy')
+        self.prompt_policy = prompt_policy
         if plant_confirm_threshold is not None:
             if (not target_confidence or type(plant_confirm_threshold) not in (int, float) or
                     not math.isfinite(plant_confirm_threshold) or
@@ -255,9 +326,8 @@ class QwenReviewer:
             image = io.BytesIO()
             Image.fromarray(rgb).save(image, format='PNG')
             pngs.append(image.getvalue())
-        template = MULTIVIEW_PROMPT if multiview else (CONFIDENCE_PROMPT if self.target_confidence else PROMPT)
-        prompt = (CHOICE_PROMPT.format(target=target, ids=candidate_ids) if candidate_ids is not None
-                  else template.format(target=target, count=len(images)))
+        prompt = build_prompt(target, target_confidence=self.target_confidence, multiview=multiview,
+                              count=len(images), candidate_ids=candidate_ids, policy=self.prompt_policy)
         content = [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
                    base64.b64encode(png).decode()}} for png in pngs]
         content.append({'type': 'text', 'text': prompt})
@@ -277,6 +347,8 @@ class QwenReviewer:
                         'prompt_sha256': hashlib.sha256(prompt.encode()).hexdigest(),
                         'request_id': request_id, 'transport_attempt': attempt + 1,
                         'transport_attempt_ids': list(attempt_ids)}
+            if self.prompt_policy != 'legacy':
+                metadata['prompt_policy'] = self.prompt_policy
             if multiview:
                 metadata.update(image_count=len(pngs),
                                 image_sha256s=[hashlib.sha256(png).hexdigest() for png in pngs],

@@ -15,7 +15,7 @@ from vlm.active_view import crop_target
 from vlm.annular_review import effective_decision
 from vlm.framing_review import object_envelope, framing_distance
 from vlm.crop_pose_review import crop_pose_band
-from vlm.qwen_review import CONFIDENCE_PROMPT, MULTIVIEW_PROMPT, CHOICE_PROMPT
+from vlm.qwen_review import build_prompt, PROMPT_POLICIES
 
 
 def sha(path):
@@ -62,7 +62,7 @@ def validate_inputs(event, sources, history, ordinal):
     assert event['evidence_age'] == event['step'] - event['evidence_step'] >= 0
 
 
-def validate_call(event, ledger, target, ordinal):
+def validate_call(event, ledger, target, ordinal, prompt_policy='legacy'):
     reply = event['model_reply']; bill = ledger['calls'][reply['call_id']]
     assert bill['state'] == reply['state'] == 'completed'
     assert bill['answer'] == reply['answer']
@@ -77,8 +77,10 @@ def validate_call(event, ledger, target, ordinal):
     assert event['decision'] == {'confirmed': 1, 'uncertain': 2, 'rejected': 3}[decision]
     hashes = [sha(p) for p in event['crops']]
     assert bill['image_sha256'] == reply['image_sha256'] == hashes[0]
-    template = CONFIDENCE_PROMPT if ordinal == 1 else MULTIVIEW_PROMPT
-    prompt = template.format(target=target, count=len(hashes))
+    assert prompt_policy in PROMPT_POLICIES
+    assert bill.get('prompt_policy', 'legacy') == reply.get('prompt_policy', 'legacy') == prompt_policy
+    prompt = build_prompt(target, target_confidence=True, multiview=ordinal == 2,
+                          count=len(hashes), policy=prompt_policy)
     assert bill['prompt_sha256'] == reply['prompt_sha256'] == hashlib.sha256(prompt.encode()).hexdigest()
     image_fields = ('image_sha256',)
     if ordinal == 2:
@@ -94,6 +96,7 @@ def validate_call(event, ledger, target, ordinal):
     assert reply['transport_attempt'] == len(ids)
     for index, call_id in enumerate(ids, 1):
         entry = ledger['calls'][call_id]
+        assert entry.get('prompt_policy', 'legacy') == prompt_policy
         assert entry['request_id'] == reply['request_id']
         assert entry['transport_attempt'] == index and entry['transport_attempt_ids'] == ids[:index]
         for field in (*image_fields, 'target', 'prompt_sha256'):
@@ -162,14 +165,16 @@ def video_audit(run, row):
     return dict(path=str(path), frames=count, fps=fps, sha256=sha(path))
 
 
-def validate_comparison_http(event, ledger, target):
+def validate_comparison_http(event, ledger, target, prompt_policy='legacy'):
     reply=event['model_reply']; ids=event['candidate_ids']; bill=ledger['calls'][reply['call_id']]
     assert 2 <= len(ids) <= 5 and len(set(ids)) == len(ids)
     assert event['outcome'] == reply['answer']['outcome'] == 'selected'
     assert event['selected_candidate'] == reply['answer']['candidate_id'] in ids
     assert type(reply['answer']['candidate_id']) is int
     hashes=[sha(p) for p in event['crops']]
-    prompt=CHOICE_PROMPT.format(target=target,ids=ids)
+    assert prompt_policy in PROMPT_POLICIES
+    assert reply.get('prompt_policy', 'legacy') == prompt_policy
+    prompt=build_prompt(target, candidate_ids=ids, policy=prompt_policy)
     expected=dict(image_count=len(ids), image_sha256s=hashes, image_sha256=hashes[0],
                   candidate_ids=ids, image_selection='candidate_best_comparison_v1',
                   target=target, prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
@@ -177,6 +182,7 @@ def validate_comparison_http(event, ledger, target):
     assert 1 <= len(attempts) <= 3 and len(set(attempts))==len(attempts) and attempts[-1]==reply['call_id']
     for n,call in enumerate(attempts,1):
         entry=ledger['calls'][call]
+        assert entry.get('prompt_policy', 'legacy') == prompt_policy
         assert all(entry[k]==v for k,v in expected.items())
         assert entry['request_id']==reply['request_id'] and entry['transport_attempt']==n
         assert entry['transport_attempt_ids']==attempts[:n]
@@ -196,6 +202,12 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     assert sum(e['event'] == 'episode_end' for e in events) == 1
     assert not any(e['event'] in ('association_missing', 'stop_review_started') for e in events)
     sensor = SimpleNamespace(**cfg['habitat']['simulator']['agents']['main_agent']['sim_sensors']['depth_sensor'])
+    prompt_policy = cfg.get('active_view', {}).get('qwen_prompt_policy', 'legacy')
+    assert prompt_policy in PROMPT_POLICIES
+    spec_path = run / 'experiment.json'
+    if spec_path.exists():
+        spec = json.loads(spec_path.read_text())
+        assert spec.get('review', {}).get('prompt_policy', 'legacy') == prompt_policy
     choice = bool(cfg.get('active_view',{}).get('choice_review',False))
     crop_pose = bool(cfg.get('active_view',{}).get('crop_pose_fallback',False))
     assert not crop_pose or choice
@@ -325,7 +337,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
                 assert source['reused'] == (key in used[ident])
                 validate_source(attempt, source, receipts[ident, *key], trace, sensor)
                 used[ident].add(key)
-            ids = validate_call(e, ledger, row['target'], ordinal)
+            ids = validate_call(e, ledger, row['target'], ordinal, prompt_policy)
             calls.append(dict(candidate=ident, step=e['step'], phase=e['phase'], decision=e['decision'],
                               effective_decision=e['effective_decision'], reply=e['model_reply'],
                               http_attempts=len(ids), image_count=e['image_count'], new_view_images=e['new_view_images']))
@@ -367,7 +379,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
                 assert match and int(match[1])==e['request_id'] and int(match[2])==e['round_index'] and int(match[4])==c
                 metadata={**source,'request_id':e['request_id'],'round_index':e['round_index'],'offset':int(match[3])}
                 validate_source(attempt,metadata,receipts[c,source['observation'],source['mask_index']],trace,sensor,comparison=True)
-            attempts=validate_comparison_http(e,ledger,row['target'])
+            attempts=validate_comparison_http(e,ledger,row['target'],prompt_policy)
             comparisons.append({**e,'http_attempts':len(attempts)})
             comparison_groups[e['request_id']].append(e)
         elif e['event']=='comparison_finished':
