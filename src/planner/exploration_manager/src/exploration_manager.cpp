@@ -1,3 +1,4 @@
+#include <exploration_manager/candidate_choice.h>
 /**
  * @file exploration_manager.cpp
  * @brief Implementation of exploration manager for autonomous semantic navigation
@@ -106,12 +107,46 @@ bool ExplorationManager::candidatePath(const Vector3d& start, int id, Vector2d& 
   return object_map2d_->candidateCloud(id, cloud) && searchObjectPath(start, cloud, goal, path);
 }
 
+bool ExplorationManager::selectNoFrontierCandidate(const Vector3d& start, bool extreme)
+{
+  if (!choice_no_frontier_) return false;
+  struct Option { int id; Vector2d goal; vector<Vector2d> path; };
+  vector<Option> options;
+  no_frontier_pool_.clear();
+  for (int id : no_frontier_candidates_) {
+    const int state=object_map2d_->reviewState(id);
+    if (state==ObjectMap2D::UNREVIEWED || state==ObjectMap2D::REJECTED ||
+        !object_map2d_->qwen_confidences_.count(id)) continue;
+    pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>> cloud;
+    Option option; option.id=id;
+    if (!object_map2d_->candidateCloud(id,cloud)) continue;
+    const bool found=extreme ? searchObjectPathExtreme(start,cloud,option.goal,option.path) :
+        searchObjectPath(start,cloud,option.goal,option.path);
+    if (found) options.push_back(option);
+  }
+  vector<ChoiceCandidate> pool;
+  for (const auto& x:options) pool.push_back({x.id,
+      object_map2d_->reviewState(x.id)==ObjectMap2D::CONFIRMED,false,true,true});
+  no_frontier_pool_=noFrontierPool(pool);
+  options.erase(std::remove_if(options.begin(),options.end(),[&](const Option& x){
+    return std::find(no_frontier_pool_.begin(),no_frontier_pool_.end(),x.id)==no_frontier_pool_.end();}),options.end());
+  if (options.empty()) return false;
+  auto chosen=std::find_if(options.begin(),options.end(),[&](const Option& x){return x.id==no_frontier_preferred_;});
+  if (chosen==options.end()) chosen=options.begin(); // Provisional only: FSM compares before any action/STOP.
+  no_frontier_choice_active_=true;
+  ed_->selected_object_id_=chosen->id; ed_->next_pos_=chosen->goal; ed_->next_best_path_=chosen->path;
+  RCLCPP_INFO(node_->get_logger(),"[No-frontier Qwen pool] count=%zu provisional=%d extreme=%d",
+      options.size(),chosen->id+1,static_cast<int>(extreme));
+  return true;
+}
+
 int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw)
 {
   Vector2d pos2d = Vector2d(pos(0), pos(1));
   auto t1 = node_->get_clock()->now();
   auto t2 = t1;
 
+  no_frontier_choice_active_=false; no_frontier_pool_.clear();
   // Clear previous planning results
   ed_->tsp_tour_.clear();
   ed_->next_best_path_.clear();
@@ -181,6 +216,8 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
   if (next_best_path.empty()) {
     RCLCPP_WARN(node_->get_logger(), "Maybe no passable frontier.");
 
+    if (selectNoFrontierCandidate(pos,false)) return SEARCH_SUSPICIOUS_OBJECT;
+
     // Try suspicious objects as backup
     if (!top_object_cloud->points.empty() &&
         searchObjectPath(pos, top_object_cloud, ed_->next_pos_, ed_->next_best_path_)) {
@@ -195,6 +232,8 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
     // Extreme search mode when all normal options fail
     if (next_best_path.empty()) {
       RCLCPP_ERROR(node_->get_logger(), "search exterme case!!!");
+
+      if (selectNoFrontierCandidate(pos,true)) return SEARCH_EXTREME;
 
       // Try extreme object search with relaxed constraints
       for (size_t i = 0; i < object_clouds.size(); ++i) {

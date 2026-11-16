@@ -120,7 +120,7 @@ private:
   bool review_automatic_ = false, review_pending_automatic_ = false;
   bool review_confidence_ = false;
   bool review_annular_ = false;
-  bool review_choice_ = false;
+  bool review_choice_ = false, review_choice_no_frontier_ = false;
   bool comparison_pending_ = false;
   uint32_t comparison_request_ = 0;
   int comparison_resume_action_ = ACTION::STOP;
@@ -131,7 +131,7 @@ private:
   plan_env::msg::CandidateComparison comparison_message_;
   rclcpp::Publisher<plan_env::msg::CandidateComparison>::SharedPtr comparison_pub_, comparison_ack_pub_;
   rclcpp::Subscription<plan_env::msg::CandidateComparison>::SharedPtr comparison_sub_;
-  bool maybeCompareCandidates();
+  bool maybeCompareCandidates(bool no_frontier = false);
   bool review_fused_ = false, review_pending_inspection_ = false;
   std::set<int> inspection_candidates_;
   int inspection_suppressed_at_ = -1;

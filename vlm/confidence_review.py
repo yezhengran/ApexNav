@@ -118,11 +118,11 @@ class ConfidenceTargetReviewer(FusedTargetReviewer):
         # center-facing gate has not been met. Keep the prior numeric score.
         return self._complete(self.UNCERTAIN, reason)
 
-    def finish_inspection(self, reachable=True):
+    def finish_inspection(self, reachable=True, *, allow_current=False):
         if not reachable:
             return self._finish('no_safe_viewpoint')
         target = self.active
-        if target is None or self.step <= target['started'] or self.last_association != self.step:
+        if target is None or (self.step < target['started'] or (self.step == target['started'] and not allow_current)) or self.last_association != self.step:
             raise RuntimeError('Missing post-motion mapped observation')
         delta = target['center'] - np.array(self.pose[:2])
         yaw = math.atan2(delta[1], delta[0])

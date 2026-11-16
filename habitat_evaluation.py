@@ -211,7 +211,7 @@ class HabitatEvalNode(Node):
         self.wait_for_associations()
         msg, self.comparison_request = self.comparison_request, None
         selected = self.linked_view.compare(list(msg.candidate_ids), msg.request_id,
-                                           msg.episode_token, msg.observation_id)
+                                           msg.episode_token, msg.observation_id, reason=msg.reason)
         msg.selected_candidate = selected
         self.comparison_ack = None
         self.comparison_pub.publish(msg)

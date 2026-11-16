@@ -184,6 +184,26 @@ class BatchTest(unittest.TestCase):
             method='selected_review', review_profile='linked_stop_preserve', early_review_threshold=.8)
         self.assertFalse(any('early_review' in x for x in old))
 
+    def test_no_frontier_and_single_view_are_explicit_dependent_switches(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'outputs') as directory:
+            ledger=Path(directory)/'budget.json'
+            ledger.write_text(json.dumps(dict(limit_cny=20,initial_spent_cny=0,calls={})))
+            base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
+                  '--method','selected_review','--review-profile','linked_choice','--step-sync',
+                  '--review-backend','qwen','--uncertain-after-steps','400',
+                  '--qwen-budget-ledger',str(ledger)]
+            def invoke(args):return subprocess.run(base+args,capture_output=True,text=True)
+            old=invoke([]);self.assertEqual(old.returncode,0,old.stderr)
+            self.assertNotIn('choice_no_frontier',json.loads(old.stdout)['spec'])
+            self.assertNotEqual(invoke(['--crop-pose-single-view']).returncode,0)
+            new=invoke(['--choice-no-frontier','--crop-pose-fallback','--crop-pose-single-view'])
+            self.assertEqual(new.returncode,0,new.stderr);spec=json.loads(new.stdout)
+            self.assertIn('+active_view.choice_no_frontier=true',spec['command'])
+            self.assertIn('+active_view.crop_pose_single_view=true',spec['command'])
+            self.assertEqual(spec['spec']['crop_pose_fallback']['minimum_samples'],1)
+            base[base.index('linked_choice')]='linked_annular'
+            self.assertNotEqual(invoke(['--choice-no-frontier']).returncode,0)
+
     def test_crop_capture_arc_is_an_explicit_choice_profile_switch(self):
         with tempfile.TemporaryDirectory(dir=ROOT/'outputs') as temporary:
             ledger=Path(temporary)/'budget.json'

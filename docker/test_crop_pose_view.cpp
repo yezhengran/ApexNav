@@ -38,6 +38,13 @@ int main() {
   assert(invalid.set({}));position=Vector2d(.6,0);
   assert(invalid.set({3,0,0,.6,.8,.6,.85,1,.6,0,2}));
   assert(!invalid.plan(position,clear,clear,route,path)); // Too little translation within a short arc.
-  assert(invalid.set({}));assert(!invalid.crop_pose);
+  // Same isolated position remains forbidden in v2; v3 permits one sample,
+  // with the identical free-space/visibility/path checks.
+  assert(invalid.set({}));position=Vector2d(1.8,0);
+  assert(invalid.set({4,0,0,1.8,.8,1.55,2.05,1,1.8,0,3}));
+  assert(invalid.plan(position,isolated,clear,route,path));
+  assert(invalid.samples.size()==1 && !invalid.advanceSample());
+  assert(!invalid.plan(position,isolated,[](const Vector2d&){return false;},route,path));
+  assert(invalid.set({}));assert(!invalid.crop_pose && !invalid.single_view);
   std::cout<<"crop-pose arc, source radius, sector and safety checks passed\n";
 }

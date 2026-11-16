@@ -12,6 +12,7 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <set>
 
 // ROS2 core
 #include <rclcpp/rclcpp.hpp>
@@ -95,6 +96,11 @@ public:
   int reachableConfirmedTarget(const Vector3d& start);
   bool candidatePath(const Vector3d& start, int id, Vector2d& goal, vector<Vector2d>& path);
 
+  bool choice_no_frontier_ = false, no_frontier_choice_active_ = false;
+  int no_frontier_preferred_ = -1;
+  std::set<int> no_frontier_candidates_;
+  std::vector<int> no_frontier_pool_;
+  bool selectNoFrontierCandidate(const Vector3d& start, bool extreme);
   typedef shared_ptr<ExplorationManager> Ptr;
 
 private:

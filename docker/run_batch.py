@@ -230,6 +230,10 @@ def main():
                         help="Bind exploration goal heading to its boundary; turn on arrival (default off)")
     parser.add_argument('--crop-pose-fallback', action='store_true',
                         help='linked_choice: one fallback arc at best-crop capture radius (default off)')
+    parser.add_argument('--choice-no-frontier', action='store_true',
+                        help='linked_choice: choose reviewed candidates before no-frontier approach')
+    parser.add_argument('--crop-pose-single-view', action='store_true',
+                        help='Allow one safe center-facing sample on a crop-pose fallback')
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
@@ -267,6 +271,10 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
+    if args.choice_no_frontier and args.review_profile != 'linked_choice':
+        parser.error('--choice-no-frontier requires linked_choice')
+    if args.crop_pose_single_view and not args.crop_pose_fallback:
+        parser.error('--crop-pose-single-view requires --crop-pose-fallback')
     if args.crop_pose_fallback and args.review_profile != 'linked_choice':
         parser.error('--crop-pose-fallback requires linked_choice')
     if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') and not args.step_sync:
@@ -389,6 +397,14 @@ def main():
             'minimum_radius_m': .6, 'maximum_radius_m': 4.5,
             'max_fallbacks': 1, 'shares_original_inspection_budget': True,
             'safety_visibility_and_Astar': 'unchanged'}
+    if args.choice_no_frontier:
+        command.append('+active_view.choice_no_frontier=true')
+        spec['choice_no_frontier'] = {'pool': 'reachable_reviewed_nonrejected;confirmed_first',
+            'single': 'direct_approach', 'multiple': 'Qwen_best_crop_choice',
+            'fallback': 'original_fusion_only_if_no_eligible_Qwen_candidate'}
+    if args.crop_pose_single_view:
+        command.append('+active_view.crop_pose_single_view=true')
+        spec['crop_pose_fallback']['minimum_samples'] = 1
     if args.failure_videos:
         spec["video_policy"] = "failures"
     if args.dry_run:
@@ -496,7 +512,8 @@ def main():
                              *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
                              *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
                              *(['review_annular:=true'] if args.review_profile in ('linked_annular', 'linked_choice') else []),
-                             *(['review_choice:=true'] if args.review_profile == 'linked_choice' else [])],
+                             *(['review_choice:=true'] if args.review_profile == 'linked_choice' else []),
+                             *(['review_choice_no_frontier:=true'] if args.choice_no_frontier else [])],
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                         )
                     time.sleep(3)

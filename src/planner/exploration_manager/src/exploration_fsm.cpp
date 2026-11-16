@@ -30,6 +30,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
     node_->declare_parameter("review.confidence", false);
     node_->declare_parameter("review.annular", false);
     node_->declare_parameter("review.choice", false);
+    node_->declare_parameter("review.choice_no_frontier", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("navigation.step_sync", step_sync_);
@@ -44,6 +45,8 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_->get_parameter("review.confidence", review_confidence_);
   node_->get_parameter("review.annular", review_annular_);
   node_->get_parameter("review.choice", review_choice_);
+  node_->get_parameter("review.choice_no_frontier", review_choice_no_frontier_);
+  if (review_choice_no_frontier_ && !review_choice_) throw std::invalid_argument("No-frontier choice requires choice review");
   if (review_choice_ && !review_annular_) throw std::invalid_argument("Choice requires annular review");
   comparison_pending_ = false; comparison_request_ = 0;
   comparison_candidates_.clear(); comparison_revisions_.clear(); comparison_cache_.clear();
@@ -88,6 +91,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
   expl_manager_->object_map2d_->annular_review_ = review_annular_;
   expl_manager_->object_map2d_->choice_review_ = review_choice_;
+  expl_manager_->choice_no_frontier_=review_choice_no_frontier_;
   visualization_.reset(new PlanningVisualization(node_));
   fp_->vis_scale_ = expl_manager_->sdf_map_->getResolution() * FSMConstants::VIS_SCALE_FACTOR;
 
@@ -157,6 +161,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
           for (int id : msg->crop_candidate_ids) if (id > 0) map->crop_review_candidates_.insert(id - 1);
           for (int id : msg->comparison_candidate_ids) if (id > 0) comparison_candidates_.insert(id - 1);
         }
+        expl_manager_->no_frontier_candidates_=comparison_candidates_;
         evidence_revisions_.clear();
         for (size_t i = 0; i < msg->candidate_ids.size(); ++i)
           if (msg->candidate_ids[i] > 0 && msg->revisions[i] <= msg->observation_id)
@@ -237,11 +242,13 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
       "/habitat/comparison_result", 10, [this](const plan_env::msg::CandidateComparison::SharedPtr msg) {
         if (!review_choice_ || !validComparisonReceipt(comparison_pending_, msg->episode_token, comparison_message_.episode_token,
             msg->observation_id, comparison_message_.observation_id, msg->request_id, comparison_message_.request_id,
-            msg->candidate_ids, comparison_message_.candidate_ids, msg->selected_candidate)) {
+            msg->candidate_ids, comparison_message_.candidate_ids, msg->selected_candidate) ||
+            msg->reason != comparison_message_.reason) {
           RCLCPP_ERROR(node_->get_logger(), "Invalid/stale comparison result"); return;
         }
         comparison_cache_[comparison_key_] = msg->selected_candidate - 1;
-        expl_manager_->object_map2d_->comparison_preferred_ = msg->selected_candidate - 1;
+        if (msg->reason=="no_frontier") expl_manager_->no_frontier_preferred_=msg->selected_candidate-1;
+        else expl_manager_->object_map2d_->comparison_preferred_ = msg->selected_candidate - 1;
         comparison_pending_ = false;
         fd_->newest_action_ = comparison_resume_action_;
         fd_->final_result_ = FINAL_RESULT::EXPLORE;  // Never STOP at the previous object's goal.
@@ -448,6 +455,17 @@ int ExplorationFSM::callActionPlanner()
   // the old goal's STOP. No extra Habitat motion is consumed by the handshake.
   if (maybeCompareCandidates()) { frontier_view_.cancel(); return FINAL_RESULT::EXPLORE; }
 
+  // Recompute the no-frontier pool before arrival checks as well: a changed
+  // completed review must not inherit the old provisional goal's STOP.
+  if (review_choice_no_frontier_ && expl_manager_->no_frontier_choice_active_) {
+    const int previous_id=expl_manager_->ed_->selected_object_id_;
+    const int new_mode=expl_manager_->planNextBestPoint(fd_->start_pt_,fd_->start_yaw_(0));
+    if (new_mode==EXPL_RESULT::EXPLORATION || expl_manager_->ed_->selected_object_id_!=previous_id)
+      fd_->final_result_=FINAL_RESULT::EXPLORE;
+    if (expl_manager_->no_frontier_choice_active_ && maybeCompareCandidates(true))
+      return FINAL_RESULT::EXPLORE;
+  }
+
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
       (current_pos - expl_manager_->ed_->next_pos_).norm() < reach_distance) {
@@ -557,6 +575,11 @@ int ExplorationFSM::callActionPlanner()
 
   expl_res = expl_manager_->planNextBestPoint(fd_->start_pt_, fd_->start_yaw_(0));
 
+  if (review_choice_no_frontier_ && expl_manager_->no_frontier_choice_active_) {
+    if (maybeCompareCandidates(true)) { frontier_view_.cancel(); return FINAL_RESULT::EXPLORE; }
+    if (expl_manager_->ed_->selected_object_id_ != expl_manager_->no_frontier_preferred_)
+      expl_res=expl_manager_->planNextBestPoint(fd_->start_pt_,fd_->start_yaw_(0));
+  }
   if (expl_res != EXPL_RESULT::EXPLORATION) {
     fd_->replan_flag_ = true;
   }
@@ -723,7 +746,7 @@ bool ExplorationFSM::maybeReviewStop()
   return requestReview(id, selected_mode_, info, true);
 }
 
-bool ExplorationFSM::maybeCompareCandidates()
+bool ExplorationFSM::maybeCompareCandidates(bool no_frontier)
 {
   if (!review_choice_ || review_pending_id_ >= 0 || active_view_.id) return false;
   if (comparison_pending_) throw std::runtime_error("Comparison handshake still pending");
@@ -736,31 +759,44 @@ bool ExplorationFSM::maybeCompareCandidates()
     candidates.push_back({id, status == ObjectMap2D::CONFIRMED, status == ObjectMap2D::REJECTED,
         status != ObjectMap2D::REJECTED && expl_manager_->candidatePath(fd_->start_pt_, id, goal, path)});
   }
-  auto ids = comparisonPool(review_step_, candidates);
-  if (ids.empty()) {
-    map->comparison_preferred_ = -1;
+  auto ids = no_frontier ? expl_manager_->no_frontier_pool_ : comparisonPool(review_step_, candidates);
+  int& preferred=no_frontier ? expl_manager_->no_frontier_preferred_ : map->comparison_preferred_;
+  if (no_frontier && ids.size()==1) {
+    if (expl_manager_->ed_->selected_object_id_ != ids[0]) fd_->final_result_=FINAL_RESULT::EXPLORE;
+    preferred=ids[0];
+    RCLCPP_INFO(node_->get_logger(),"[No-frontier single candidate] id=%d step=%d",ids[0]+1,review_step_);
     return false;
   }
-  string key = late ? "late" : "confirmed";
+  if (ids.empty()) {
+    preferred = -1;
+    return false;
+  }
+  const string phase=no_frontier ? "no_frontier" : (late ? "late_unconfirmed" : "multiple_confirmed");
+  string key = phase;
   for (int id : ids) key += ":" + std::to_string(id) + "/" + std::to_string(comparison_revisions_[id]);
   auto cached = comparison_cache_.find(key);
   if (cached != comparison_cache_.end()) {
     if (expl_manager_->ed_->selected_object_id_ != cached->second) fd_->final_result_ = FINAL_RESULT::EXPLORE;
-    map->comparison_preferred_ = cached->second;
+    preferred = cached->second;
     return false;
   }
-  map->comparison_preferred_ = -1;
+  preferred = -1;
   comparison_key_ = key;
   comparison_message_ = plan_env::msg::CandidateComparison();
   comparison_message_.episode_token = map->evidence_episode_token_;
   comparison_message_.observation_id = review_step_;
   comparison_message_.request_id = ++comparison_request_;
+  comparison_message_.reason=phase;
   for (int id : ids) comparison_message_.candidate_ids.push_back(id + 1);
   comparison_pending_ = true;
   comparison_resume_action_ = fd_->newest_action_;
   fd_->newest_action_ = ACTION::COMPARE_CANDIDATES;
   RCLCPP_INFO(node_->get_logger(), "[Comparison request] request=%u candidates=%zu phase=%s step=%d",
-      comparison_request_, ids.size(), late ? "late_unconfirmed" : "multiple_confirmed", review_step_);
+      comparison_request_, ids.size(), phase.c_str(), review_step_);
+  string exact_ids;
+  for (int id:ids) exact_ids+=(exact_ids.empty()?"":",")+std::to_string(id+1);
+  RCLCPP_INFO(node_->get_logger(),"[Comparison pool] request=%u ids=%s phase=%s step=%d",
+      comparison_request_,exact_ids.c_str(),phase.c_str(),review_step_);
   comparison_pub_->publish(comparison_message_);
   return true;
 }

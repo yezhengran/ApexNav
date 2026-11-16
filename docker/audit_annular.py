@@ -199,6 +199,10 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     choice = bool(cfg.get('active_view',{}).get('choice_review',False))
     crop_pose = bool(cfg.get('active_view',{}).get('crop_pose_fallback',False))
     assert not crop_pose or choice
+    single_view = bool(cfg.get('active_view',{}).get('crop_pose_single_view',False))
+    assert not single_view or crop_pose
+    no_frontier_choice = bool(cfg.get('active_view',{}).get('choice_no_frontier',False))
+    assert not no_frontier_choice or choice
     fallbacks = {}
     comparisons=[]; comparison_requests={}; comparison_groups={}; comparison_finished={}; comparison_keys=set()
     comparison_sources=None; decisions={}; trigger_checks={}
@@ -303,7 +307,8 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert error <= math.radians(18)+1e-6 and abs(math.degrees(error)-e['yaw_error_degrees']) < 1e-7
             arrival = arrivals[ident]; assert arrival['step'] == e['step']
             assert arrival['distance']+1e-5 >= arrival['minimum_radius']
-            assert requested[ident]['step'] < e['step'] < 400
+            assert requested[ident]['step'] <= e['step'] < 400
+            assert requested[ident]['step'] < e['step'] or (single_view and ident in fallbacks)
             facing[ident] = e
         elif e['event'] == 'verification_source':
             pending.append(e)
@@ -329,9 +334,18 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert choice and e['request_id']==len(comparison_requests)+1
             ids=e['candidate_ids'];assert len(ids)>=2 and ids==sorted(set(ids))
             assert all(ranked(histories[i]) and decisions.get(i)!=3 for i in ids)
-            if e['step']<400:assert all(decisions.get(i)==1 for i in ids)
-            else:assert not any(v==1 for v in decisions.values())
-            key=(e['step']>=400,tuple((i,counts[i]) for i in ids))
+            phase=e.get('reason') or ('multiple_confirmed' if e['step']<400 else 'late_unconfirmed')
+            assert phase in ('no_frontier','multiple_confirmed','late_unconfirmed')
+            if phase=='no_frontier':
+                assert no_frontier_choice and all(counts[i]>0 and decisions.get(i) in (1,2,4) for i in ids)
+                assert not any(decisions.get(i)==1 for i in ids) or all(decisions.get(i)==1 for i in ids)
+                planner=(run/'planner.log').read_text()
+                assert f'[Comparison request] request={e["request_id"]} candidates={len(ids)} phase=no_frontier step={e["step"]}' in planner
+                assert f'[Comparison pool] request={e["request_id"]} ids={",".join(map(str,ids))} phase=no_frontier step={e["step"]}' in planner
+                assert '[No-frontier Qwen pool]' in planner
+            elif phase=='multiple_confirmed':assert e['step']<400 and all(decisions.get(i)==1 for i in ids)
+            else:assert e['step']>=400 and not any(v==1 for v in decisions.values())
+            key=(phase,tuple((i,counts[i]) for i in ids))
             assert key not in comparison_keys;comparison_keys.add(key)
             comparison_requests[e['request_id']]=e;comparison_groups[e['request_id']]=[]
         elif e['event']=='comparison_sources':
@@ -408,7 +422,8 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     for match in re.finditer(pattern, planner):
         ident, number, total, step = map(int, match.groups()[:4])
         x, y, yaw = map(float, match.groups()[4:]); pose = trace[step]['pose']
-        assert ident in requested and 2 <= total <= 3 and 1 <= number <= total
+        assert ident in requested and 1 <= total <= 3 and 1 <= number <= total
+        assert total >= 2 or (single_view and ident in fallbacks)
         np.testing.assert_allclose([x, y, yaw], [-pose[2], -pose[0], pose[3]], atol=6e-5, rtol=0)
         distance = math.dist([x, y], requested[ident]['center'])
         assert geometry[ident]['minimum_radius']-1e-4 <= distance <= geometry[ident]['max_radius']+1e-4

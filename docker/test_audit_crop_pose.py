@@ -16,6 +16,8 @@ class CropPoseAuditTests(unittest.TestCase):
     def setUp(self):
         self.f = fixture.CropPoseTests(); self.f.setUp(); self.addCleanup(self.f.doCleanups)
         self.run = Path(self.f.fixture.tmp.name)
+        self.single_view=getattr(self,'single_view',False)
+        self.f.v.cfg.crop_pose_single_view=self.single_view
         ledger = self.run/'budget.json'
         ledger.write_text(json.dumps(dict(limit_cny=20, initial_spent_cny=0, calls={})))
         with patch('vlm.qwen_review.read_credentials', return_value='fake-key'):
@@ -27,20 +29,23 @@ class CropPoseAuditTests(unittest.TestCase):
             self.f.frame(1,.9,yaw=math.pi/4); self.f.frame(2,.8,yaw=math.pi/4)
             self.f.begin(); self.f.begin(4.)
             self.f.v.finish_inspection(False,initial_unavailable=True)
-            self.f.frame(3,.1,yaw=math.pi/4)
+            if not self.single_view:self.f.frame(3,.1,yaw=math.pi/4)
             self.f.v.finish_inspection(True); self.f.v.finish_episode()
         self.events = [json.loads(s) for s in (self.f.v.directory/'events.jsonl').read_text().splitlines()]
         self.bill = json.loads(ledger.read_text())
-        self.cfg = {'active_view':{'choice_review':True,'crop_pose_fallback':True},'habitat':{'simulator':{
+        self.cfg = {'active_view':{'choice_review':True,'crop_pose_fallback':True,'crop_pose_single_view':self.single_view},'habitat':{'simulator':{
             'agents':{'main_agent':{'sim_sensors':{'depth_sensor':vars(self.f.v.sensor)}}}}}}
-        self.trace = [dict(step=i,action=2 if i else None,pose=[0.,0.,0.,math.pi/4,0.]) for i in range(4)]
-        self.row = dict(success='1',steps='3',video_path='',target='chair')
+        self.trace = [dict(step=i,action=2 if i else None,pose=[0.,0.,0.,math.pi/4,0.]) for i in range(3 if self.single_view else 4)]
+        self.row = dict(success='1',steps='2' if self.single_view else '3',video_path='',target='chair')
         self.log = '\n'.join([
             '[Conditional inspection trigger] id=1 ',
             '[Annular search] id=1 mode=framing step=2 radius=3.0 generated=72 safe=0 visible=0 access=0 arcs=0 accepted=0',
             '[Annular sample] id=1 sample=1/2 step=2 position=(0.0000,0.0000) yaw=0.7854',
             '[Annular sample] id=1 sample=2/2 step=3 position=(0.0000,0.0000) yaw=0.7854',
             *[f'[Candidate scores] step={i} id=1 fusion=0.7 state=2 has_qwen=1 qwen=0.4 rank=0.7 late=0' for i in (2,3)]])
+        if self.single_view:
+            self.log=self.log.replace('sample=1/2','sample=1/1')
+            self.log='\n'.join(line for line in self.log.splitlines() if 'sample=2/2' not in line)
         (self.run/'planner.log').write_text(self.log)
 
     def check(self, events=None):
@@ -50,7 +55,7 @@ class CropPoseAuditTests(unittest.TestCase):
     def test_recorded_fallback_source_joint_images_and_ledger(self):
         result = self.check()
         self.assertEqual(result['crop_pose_fallbacks'],[1])
-        self.assertEqual([c['image_count'] for c in result['calls']],[1,3])
+        self.assertEqual([c['image_count'] for c in result['calls']],[1,2 if self.single_view else 3])
 
     def test_fallback_geometry_source_or_boundary_tamper(self):
         for key,value in [('radius',1.),('pose',[1.,0.,math.pi/4]),('observation',2),
@@ -80,6 +85,16 @@ class CropPoseAuditTests(unittest.TestCase):
         events = copy.deepcopy(self.events)
         next(e for e in events if e['event']=='inspection_crop_pose_arrival')['minimum_radius'] = .6
         with self.assertRaises(AssertionError): self.check(events)
+
+
+class SingleCropPoseAuditTests(CropPoseAuditTests):
+    single_view=True
+
+    def test_single_sample_and_same_step_require_opt_in(self):
+        result=self.check()
+        self.assertEqual(result['inspection_actions'],0)
+        self.cfg['active_view']['crop_pose_single_view']=False
+        with self.assertRaises(AssertionError):self.check()
 
 
 if __name__ == '__main__': unittest.main()

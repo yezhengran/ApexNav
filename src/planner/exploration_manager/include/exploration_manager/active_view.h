@@ -19,7 +19,7 @@ public:
   double minimum_radius = 0.0, max_radius = 0.0;
   bool framing = false;
   bool annular = false;
-  bool crop_pose = false;
+  bool crop_pose = false, single_view = false;
   double reference_angle = 0.;
   struct SearchStats { int generated=0, safe=0, visible=0, access=0, arcs=0; } search;
   std::vector<Eigen::Vector2d> samples;
@@ -45,7 +45,7 @@ public:
     if (data.size() >= 8 && data[7] != 1.) return false;
     if (data.size() == 11) {
       const double reference = std::hypot(data[8]-data[1],data[9]-data[2]);
-      if (data[10] != 2. || std::abs(reference-data[3]) > 1e-6 ||
+      if ((data[10] != 2. && data[10] != 3.) || std::abs(reference-data[3]) > 1e-6 ||
           std::abs(data[5]-std::max(.6,reference-.25)) > 1e-6 ||
           std::abs(data[6]-std::min(4.5,reference+.25)) > 1e-6) return false;
     }
@@ -57,6 +57,7 @@ public:
     framing = data.size() >= 7;
     annular = data.size() == 8 || data.size() == 11;
     crop_pose = data.size() == 11;
+    single_view = crop_pose && data[10] == 3.;
     reference_angle = crop_pose ? std::atan2(data[9]-data[2],data[8]-data[1]) : 0.;
     search = SearchStats();
     samples.clear(); sample_index = 0;
@@ -163,7 +164,9 @@ public:
     constexpr double pi = 3.14159265358979323846;
     search = SearchStats();
     double best_cost = INFINITY;
-    std::vector<Eigen::Vector2d> best_path;
+    std::vector<Eigen::Vector2d> best_path, single_path;
+    Eigen::Vector2d single_goal=Eigen::Vector2d::Zero();
+    double single_cost = INFINITY;
     // The fallback keeps the measured radius exactly; no shrinking search.
     // Its five headings span +/-30 degrees around the actual capture position.
     for (int ring = 0; ring < (crop_pose ? 1 : 3); ++ring) {
@@ -182,6 +185,9 @@ public:
         ++search.access;
         double access_cost = 0.;
         for (size_t i=1;i<access.size();++i) access_cost += (access[i]-access[i-1]).norm();
+        if (single_view && access_cost < single_cost) {
+          single_cost=access_cost; single_goal=entry; single_path=access;
+        }
         for (int sign : {-1, 1}) {
           std::vector<Eigen::Vector2d> candidate{entry};
           double cost = access_cost;
@@ -206,6 +212,11 @@ public:
           if (cost < best_cost) { best_cost=cost; samples=candidate; best_path=access; }
         }
       }
+    }
+    // Prefer a safe short arc when one exists; a single valid point is enough
+    // for the opt-in fallback when no multi-point arc can be formed.
+    if (samples.empty() && single_view && std::isfinite(single_cost)) {
+      samples={single_goal}; best_path=single_path;
     }
     if (samples.empty()) { path.clear(); return false; }
     sample_index=0; goal=samples.front(); locked=true; path=best_path;

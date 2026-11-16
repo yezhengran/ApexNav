@@ -37,15 +37,21 @@ class ChoiceTargetReviewer(AnnularTargetReviewer):
                    threshold=threshold, crop_threshold=.7, crop_passed=crop, allowed=allowed)
         return allowed
 
-    def compare(self, candidate_ids, request_id, episode_token, observation_id):
+    def compare(self, candidate_ids, request_id, episode_token, observation_id, reason=""):
         if (episode_token != self.episode_token or observation_id != self.step or
                 request_id <= self.last_comparison_request or self.selected is not None or
                 self.active is not None or len(candidate_ids) < 2 or
                 candidate_ids != sorted(set(candidate_ids)) or
                 not set(candidate_ids).issubset(self.comparison_ready())):
             raise RuntimeError('Invalid or stale candidate comparison request')
+        if reason not in ('', 'multiple_confirmed', 'late_unconfirmed', 'no_frontier'):
+            raise RuntimeError('Unknown candidate comparison phase')
+        if reason == 'no_frontier' and (not getattr(self.cfg, 'choice_no_frontier', False) or
+                any(i not in self.qwen_scores or self.histories.get(i, {}).get('decision') not in
+                    (self.CONFIRMED, self.UNCERTAIN, self.PENDING_EVIDENCE) for i in candidate_ids)):
+            raise RuntimeError('No-frontier comparison requires reviewed nonrejected candidates')
         self.last_comparison_request = request_id
-        self.event('comparison_requested', request_id=request_id, candidate_ids=candidate_ids)
+        self.event('comparison_requested', request_id=request_id, candidate_ids=candidate_ids, reason=reason)
         remaining = list(candidate_ids)
         round_index = 0
         # Groups have <=5 images (same conservative per-HTTP reservation). All

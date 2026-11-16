@@ -59,6 +59,16 @@ class ChoiceTests(AnnularTests):
         with self.assertRaises(RuntimeError):self.v.compare([1,2],1,42,2)
         self.backend.compare_candidates.assert_not_called()
 
+    def test_no_frontier_gate_requires_switch_and_completed_reviews(self):
+        self.frame(1,.8,ident=1);self.frame(2,.9,ident=2)
+        with self.assertRaisesRegex(RuntimeError,'reviewed'):self.v.compare([1,2],1,42,2,reason='no_frontier')
+        self.v.cfg.choice_no_frontier=True
+        with self.assertRaisesRegex(RuntimeError,'reviewed'):self.v.compare([1,2],1,42,2,reason='no_frontier')
+        for i in [1,2]:
+            self.v.histories[i]={'calls':1,'decision':self.v.UNCERTAIN};self.v.qwen_scores[i]=.4
+        self.assertEqual(self.v.compare([1,2],1,42,2,reason='no_frontier'),2)
+        self.assertEqual(self.v.histories[2]['decision'],self.v.UNCERTAIN)
+
     def test_all_candidates_participate_in_bounded_groups(self):
         for ident in range(1,13):self.frame(ident,ident=ident)
         self.assertEqual(self.v.compare(list(range(1,13)),1,42,12),12)

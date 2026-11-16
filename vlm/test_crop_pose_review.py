@@ -82,6 +82,22 @@ class CropPoseTests(unittest.TestCase):
         data['pose']=np.array([1,1,0]);np.savez_compressed(source,**data)
         with self.assertRaisesRegex(RuntimeError,'pose'):self.v.finish_inspection(False,initial_unavailable=True)
 
+    def test_single_point_switch_and_current_mapped_facing_view(self):
+        self.v.cfg.crop_pose_single_view=True
+        self.frame(1,.9,yaw=math.pi/4);self.frame(2,.8,yaw=math.pi/4)
+        self.begin();self.begin(4.);self.v.finish_inspection(False,initial_unavailable=True)
+        self.assertEqual(self.v.request()[-1],3.)
+        self.assertEqual(self.v.finish_inspection(True),(1,2))
+        self.assertEqual(len(self.backend.joint),1)
+        self.assertEqual(self.v.stats['inspection_actions'],0) # No fictitious motion.
+
+    def test_single_point_still_requires_center_facing_and_association(self):
+        self.v.cfg.crop_pose_single_view=True;self.prepare()
+        self.v.finish_inspection(False,initial_unavailable=True)
+        with self.assertRaisesRegex(RuntimeError,'facing'):self.v.finish_inspection(True)
+        self.v.last_association=0
+        with self.assertRaisesRegex(RuntimeError,'mapped'):self.v.finish_inspection(True)
+
     def test_radius_never_clamped_or_shrunk(self):
         self.assertFalse(crop_pose_band([0,0],[.4,0,0])['feasible'])
         self.assertEqual(crop_pose_band([0,0],[5,0,0])['radius'],5)

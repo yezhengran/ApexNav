@@ -66,9 +66,10 @@ class CropPoseTargetReviewer(ChoiceTargetReviewer):
     def request(self):
         value = super().request()
         if value and self.active.get('crop_pose_mode'):
-            # Eleven-field v2 contract; the planner verifies the reference
+            # Eleven-field v2/v3 contract; v3 explicitly permits one point.
+            # The planner verifies the reference
             # pose implies the exact radius and bounded band before accepting.
-            value += list(self.active['crop_pose_source']) + [2.]
+            value += list(self.active['crop_pose_source']) + [3. if getattr(self.cfg, 'crop_pose_single_view', False) else 2.]
         return value
 
     def finish_inspection(self, reachable=True, initial_unavailable=False):
@@ -82,7 +83,8 @@ class CropPoseTargetReviewer(ChoiceTargetReviewer):
             self.event('inspection_crop_pose_arrival', candidate=target['id'], distance=distance,
                        minimum_radius=target['minimum_radius'], max_radius=target['max_radius'])
             # This mode intentionally uses the observed crop's radius, not the
-            # full-frame distance guarantee. Facing/association/fresh action
+            # full-frame distance guarantee. Facing/current association
             # and the two-call limit are still checked by Confidence/Annular.
-            return ConfidenceTargetReviewer.finish_inspection(self, True)
+            return ConfidenceTargetReviewer.finish_inspection(self, True,
+                allow_current=getattr(self.cfg, 'crop_pose_single_view', False))
         return super().finish_inspection(reachable)
