@@ -1,7 +1,7 @@
 # ObjectNav 新窗口交接
 
 <!-- Q8_HANDOFF_START -->
-**2026-11-16最新授权：Q8-C2新增无前沿Qwen候选选择和单点备用观测，仅重测459／462。** 默认关闭的新开关 `--choice-no-frontier --crop-pose-single-view`（后者依赖 `--crop-pose-fallback`），有可达已复查未否定候选时不让未复查融合领先者取代；多候选由Qwen比较，单候选直接靠近。备用圈一个安全可见可达点即可，朝向核验不放宽。新完整overlay `outputs/build/no-frontier-single-20261116/install`，新独占控制 `experiment_notes/qwen-no-frontier-single-diagnostic2-20261116/`；源码冻结后新跑两例，旧结果保持。401–500和自动跟进仍暂停。见[方法与重测](experiments/2026-11-16-qwen-no-frontier-single.zh-CN.md)。下方状态为历史。
+**2026-11-16 14:40北京，Q8-C2仅459／462重测完成并独立验收：1/2成功。** 实现／运行提交 `8885fd7d`，202源 `dda395000d64…`；`linked_choice --crop-pose-fallback --crop-pose-single-view --choice-no-frontier`，frontier-look关闭。459由失败变成功：63步、任务距离0.0666米，备用圈单点接受、7观测动作、联合4图后Qwen仍uncertain（0.40→0.65），原导航到达成功，无虚假确认。462仍187步失败／1.7870米：备用圈视线筛查后0点，第167步无前沿Qwen比较18／20选18，实际轨迹与上次相同；比较触发但未提高该例结果。5次单次HTTP、0网络恢复，新增0.005390元，账本2.986154/20；失败视频仅462的188帧，成功视频按要求删除。128Python、3组C++、真实ROS、10控制故障测试及2例完整独立验收通过，641新构建／57,675历史文件保持。控制器、导航与四模型均退出。新证据 `experiment_notes/qwen-no-frontier-single-diagnostic2-20261116/`，旧入口不重跑，**401–500和自动跟进继续暂停。** 见[方法与结果](experiments/2026-11-16-qwen-no-frontier-single.zh-CN.md)。以下均历史。
 
 **2026-11-16 14:04北京，Q8-C最佳crop距离备用弧两例重测完成并独立验收：459／462仍0/2。** 运行提交`70d8341c`，202源`243d9ef67ae2…`，`linked_choice --crop-pose-fallback`、frontier-look关闭。459为182步／1.7213米，462为187步／1.7870米；动作、位姿和输入图逐步与上次Q8-C一致。4次备用弧确实生成：459候选8有1个可见可达点但不足两点短弧，其余三个备用弧没有点通过规划器视线筛查；0实际观测动作、0联合复查、4次单图Qwen均不确定／质量不足。不能将地图视线筛查失败等同真实相机看不见。独立验收371失败视频帧、来源／mask／拍摄半径／HTTP链通过，57547旧证据保持；新增0.004068元，账本2.980764/20，0网络重试／恢复。控制器、评测、规划器和四模型已退出，容器只剩sleep。新控制与证据`experiment_notes/qwen-crop-pose-diagnostic2-20261116/`；新输出同名runs目录。**401–500及自动跟进继续暂停，所有旧入口不得重跑。** 见[重测结果](experiments/2026-11-16-qwen-crop-pose-diagnostic2.zh-CN.md)。以下“尚未在线评测”等为此次重测前历史。
 
