@@ -14,6 +14,7 @@ from PIL import Image
 from vlm.active_view import crop_target
 from vlm.annular_review import effective_decision
 from vlm.framing_review import object_envelope, framing_distance
+from vlm.crop_pose_review import crop_pose_band
 from vlm.qwen_review import CONFIDENCE_PROMPT, MULTIVIEW_PROMPT, CHOICE_PROMPT
 
 
@@ -106,11 +107,14 @@ def validate_call(event, ledger, target, ordinal):
     return ids
 
 
-def validate_source(attempt, source, receipt, trace, sensor, crop=True, comparison=False):
+def validate_source(attempt, source, receipt, trace, sensor, crop=True, comparison=False, fallback=False):
     ident, obs, mask_index = source['candidate'], source['observation'], source['mask_index']
     path = Path(source['source_file'])
     assert path.resolve().parent == attempt.resolve()
-    if comparison:
+    if fallback:
+        assert not crop and not comparison
+        assert path == attempt / f'fallback-{ident:03d}-s{obs:04d}-m{mask_index:02d}.npz'
+    elif comparison:
         assert path == attempt / (f'comparison-{source["request_id"]:03d}-'
                     f'{source["round_index"]:02d}-{source["offset"]:03d}-{ident:03d}.npz')
         assert Path(source['crop']) == path.with_suffix('.png')
@@ -128,6 +132,9 @@ def validate_source(attempt, source, receipt, trace, sensor, crop=True, comparis
         np.testing.assert_allclose(data['pose'], [-pose[2], -pose[0], pose[3]], rtol=0, atol=1e-7)
         assert abs(float(data['pitch']) - pose[4]) < 1e-7
         assert abs(float(data['camera_height']) - pose[1] - sensor.position[1]) < 1e-7
+        if fallback:
+            np.testing.assert_allclose(data['bounds'], source['bounds'], rtol=0, atol=1e-8)
+            np.testing.assert_allclose(data['pose'], source['pose'], rtol=0, atol=1e-7)
         if crop:
             np.testing.assert_allclose(data['bounds'], source['bounds'], rtol=0, atol=1e-8)
             np.testing.assert_allclose(data['pose'], source['pose'], rtol=0, atol=1e-7)
@@ -190,6 +197,9 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     assert not any(e['event'] in ('association_missing', 'stop_review_started') for e in events)
     sensor = SimpleNamespace(**cfg['habitat']['simulator']['agents']['main_agent']['sim_sensors']['depth_sensor'])
     choice = bool(cfg.get('active_view',{}).get('choice_review',False))
+    crop_pose = bool(cfg.get('active_view',{}).get('crop_pose_fallback',False))
+    assert not crop_pose or choice
+    fallbacks = {}
     comparisons=[]; comparison_requests={}; comparison_groups={}; comparison_finished={}; comparison_keys=set()
     comparison_sources=None; decisions={}; trigger_checks={}
     receipts = {}; histories = collections.defaultdict(list); pending = []
@@ -244,6 +254,27 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert counts[ident] == 1 and next(x for x in reversed(calls) if x['candidate'] == ident)['decision'] == 2
             assert e['reason'] == 'no_reachable_confirmed_alternative'
             requested[ident] = e
+        elif e['event'] == 'inspection_crop_pose_fallback':
+            assert crop_pose and ident in requested and ident not in fallbacks
+            assert e['step'] == requested[ident]['step'] < 400
+            assert not any(x['candidate'] == ident for x in actions)
+            assert e['reason'] in ('primary_geometry_unavailable', 'primary_route_unavailable')
+            assert geometry[ident]['feasible'] == (e['reason'] == 'primary_route_unavailable')
+            best = ranked(histories[ident])[0]
+            for k in ('observation','mask_index','detector_score','pose'):
+                assert e[k] == best[k]
+            assert e['selection'] == 'best_object_history_at_inspection'
+            assert e['center'] == requested[ident]['center']
+            assert e['original_radius'] == geometry[ident]['radius']
+            assert e['half_arc_degrees'] == 30 and e['half_width'] == .25
+            validate_source(attempt,e,receipts[ident,e['observation'],e['mask_index']],trace,sensor,
+                            crop=False,fallback=True)
+            expected = crop_pose_band(e['center'],e['pose'])
+            for k,v in expected.items():
+                assert math.isclose(e[k],v,abs_tol=1e-8) if type(v) is float else e[k] == v
+            fallbacks[ident] = e
+            if e['feasible']:
+                geometry[ident] = e
         elif e['event'] == 'inspection_evidence':
             assert ident in requested and e['action']==trace[e['step']]['action']
             if e['action']==0:
@@ -253,7 +284,12 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
                 assert not any(x['event']=='verification' and x['step']>=e['step'] for x in events)
             else:assert e['action'] in (1,2,3)
             actions.append(e)
-        elif e['event'] == 'inspection_framing_arrival':
+        elif e['event'] in ('inspection_framing_arrival','inspection_crop_pose_arrival'):
+            assert (e['event'] == 'inspection_crop_pose_arrival') == (ident in fallbacks)
+            if ident in fallbacks:
+                assert fallbacks[ident]['feasible']
+                assert e['minimum_radius'] == geometry[ident]['minimum_radius']
+                assert e['max_radius'] == geometry[ident]['max_radius']
             pose = trace[e['step']]['pose']; request = requested[ident]
             distance = math.dist([-pose[2], -pose[0]], request['center'])
             assert abs(distance-e['distance']) < 1e-7
@@ -363,6 +399,11 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
         assert any(step == call['step'] and ident == call['candidate'] and has and
                    abs(qwen-call['reply']['answer']['target_confidence']) < 1e-8 for step, ident, has, qwen in snapshots)
     samples = collections.defaultdict(list)
+    for ident,e in fallbacks.items():
+        if e['reason'] == 'primary_route_unavailable':
+            p = (rf'\[Annular search\] id={ident} mode=framing step={e["step"]} '
+                 r'radius=[\d.]+ generated=\d+ safe=\d+ visible=\d+ access=\d+ arcs=\d+ accepted=0')
+            assert re.search(p,planner), 'Missing failed primary planner search'
     pattern = r'\[Annular sample\] id=(\d+) sample=(\d+)/(\d+) step=(\d+) position=\(([-\d.]+),([-\d.]+)\) yaw=([-\d.]+)'
     for match in re.finditer(pattern, planner):
         ident, number, total, step = map(int, match.groups()[:4])
@@ -371,6 +412,11 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
         np.testing.assert_allclose([x, y, yaw], [-pose[2], -pose[0], pose[3]], atol=6e-5, rtol=0)
         distance = math.dist([x, y], requested[ident]['center'])
         assert geometry[ident]['minimum_radius']-1e-4 <= distance <= geometry[ident]['max_radius']+1e-4
+        if ident in fallbacks:
+            # A 0.20m arrival disc can offset the realized angular position.
+            a=math.atan2(y-requested[ident]['center'][1],x-requested[ident]['center'][0])
+            delta=abs(math.atan2(math.sin(a-fallbacks[ident]['reference_angle']),math.cos(a-fallbacks[ident]['reference_angle'])))
+            assert delta <= math.radians(30)+math.asin(min(1.,.2001/distance))+1e-4
         desired = math.atan2(requested[ident]['center'][1]-y, requested[ident]['center'][0]-x)
         assert abs(math.atan2(math.sin(desired-yaw), math.cos(desired-yaw))) <= math.radians(18)+1e-4
         samples[ident].append((number, total, step))
@@ -380,7 +426,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert group and [x[0] for x in group] == list(range(1, group[-1][1]+1))
             assert len({x[1] for x in group}) == 1 and group[-1][2] == call['step']
     assert all(f'[Conditional inspection trigger] id={ident} ' in planner for ident in requested)
-    return dict(comparisons=comparisons, calls=calls, inspection_candidates=sorted(requested), inspection_actions=len(actions),
+    return dict(crop_pose_fallbacks=sorted(fallbacks), comparisons=comparisons, calls=calls, inspection_candidates=sorted(requested), inspection_actions=len(actions),
                 inspection_motion_types=dict(collections.Counter(e['action'] for e in actions)),
                 review={k: events[-1].get(k, 0) for k in ('selected_targets', 'vlm_calls', 'vlm_seconds', 'confirmed', 'uncertain', 'rejected', 'pending_evidence', 'inspection_actions')},
                 events_sha256=sha(attempt/'events.jsonl'), video=video_audit(run, row))

@@ -184,6 +184,26 @@ class BatchTest(unittest.TestCase):
             method='selected_review', review_profile='linked_stop_preserve', early_review_threshold=.8)
         self.assertFalse(any('early_review' in x for x in old))
 
+    def test_crop_capture_arc_is_an_explicit_choice_profile_switch(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'outputs') as temporary:
+            ledger=Path(temporary)/'budget.json'
+            ledger.write_text(json.dumps(dict(limit_cny=20,initial_spent_cny=0,calls={})))
+            base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
+                  '--method','selected_review','--review-profile','linked_choice','--step-sync',
+                  '--review-backend','qwen','--uncertain-after-steps','400',
+                  '--qwen-budget-ledger',str(ledger)]
+            old=subprocess.run(base,capture_output=True,text=True)
+            new=subprocess.run(base+['--crop-pose-fallback'],capture_output=True,text=True)
+            self.assertEqual(old.returncode,0,old.stderr);self.assertEqual(new.returncode,0,new.stderr)
+            a,b=json.loads(old.stdout),json.loads(new.stdout)
+            self.assertEqual(b['command'],a['command']+['+active_view.crop_pose_fallback=true'])
+            self.assertNotIn('crop_pose_fallback',a['spec'])
+            self.assertTrue(b['spec']['crop_pose_fallback']['shares_original_inspection_budget'])
+            base[base.index('linked_choice')]='linked_annular'
+            bad=subprocess.run(base+['--crop-pose-fallback'],capture_output=True,text=True)
+            self.assertNotEqual(bad.returncode,0)
+            self.assertIn('requires linked_choice',bad.stderr)
+
     def test_early_cli_rejects_invalid_threshold_and_missing_step_sync(self):
         base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
               '--method','selected_review','--review-profile','linked_early']

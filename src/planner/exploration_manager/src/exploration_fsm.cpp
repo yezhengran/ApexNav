@@ -866,8 +866,17 @@ int ExplorationFSM::planInspection()
   };
   vector<Vector2d> path;
   const bool was_locked = active_view_.locked;
-  if (!active_view_.plan(position, safe, clear, route, path)) {
-    fd_->newest_action_ = ACTION::INSPECTION_FAILED;
+  const bool planned = active_view_.plan(position, safe, clear, route, path);
+  if (!was_locked && active_view_.annular) {
+    const auto& s=active_view_.search;
+    RCLCPP_INFO(node_->get_logger(),
+        "[Annular search] id=%d mode=%s step=%d radius=%.6f generated=%d safe=%d visible=%d access=%d arcs=%d accepted=%d",
+        active_view_.id, active_view_.crop_pose ? "crop_pose" : "framing", review_step_,
+        active_view_.radius,s.generated,s.safe,s.visible,s.access,s.arcs,static_cast<int>(planned));
+  }
+  if (!planned) {
+    fd_->newest_action_ = !was_locked && active_view_.annular ?
+        ACTION::INSPECTION_NO_ROUTE : ACTION::INSPECTION_FAILED;
     return FINAL_RESULT::EXPLORE;
   }
   if (!was_locked)

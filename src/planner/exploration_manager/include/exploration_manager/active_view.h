@@ -19,6 +19,9 @@ public:
   double minimum_radius = 0.0, max_radius = 0.0;
   bool framing = false;
   bool annular = false;
+  bool crop_pose = false;
+  double reference_angle = 0.;
+  struct SearchStats { int generated=0, safe=0, visible=0, access=0, arcs=0; } search;
   std::vector<Eigen::Vector2d> samples;
   size_t sample_index = 0;
   bool locked = false;
@@ -31,7 +34,7 @@ public:
   bool set(const std::vector<double>& data)
   {
     if (data.empty()) { *this = ActiveView(); return true; }
-    if (data.size() != 5 && data.size() != 6 && data.size() != 7 && data.size() != 8) return false;
+    if (data.size() != 5 && data.size() != 6 && data.size() != 7 && data.size() != 8 && data.size() != 11) return false;
     for (double x : data) if (!std::isfinite(x)) return false;
     if (data[0] < 1 || data[0] > 1000000 || std::floor(data[0]) != data[0] ||
         data[3] < 0.6 || data[3] > (data.size() >= 7 ? 4.5 : 3.5) || data[4] < 0.15 || data[4] > 3.0)
@@ -39,14 +42,23 @@ public:
     if (data.size() == 6 && data[5] != 1.0) return false;
     if (data.size() >= 7 && (data[5] < .6 || data[5] > data[3] ||
         data[6] < data[3] || data[6] > 4.5)) return false;
-    if (data.size() == 8 && data[7] != 1.) return false;
+    if (data.size() >= 8 && data[7] != 1.) return false;
+    if (data.size() == 11) {
+      const double reference = std::hypot(data[8]-data[1],data[9]-data[2]);
+      if (data[10] != 2. || std::abs(reference-data[3]) > 1e-6 ||
+          std::abs(data[5]-std::max(.6,reference-.25)) > 1e-6 ||
+          std::abs(data[6]-std::min(4.5,reference+.25)) > 1e-6) return false;
+    }
     if (id == static_cast<int>(data[0])) return true;  // Freeze this instance.
     id = static_cast<int>(data[0]);
     center = Eigen::Vector2d(data[1], data[2]);
     radius = data[3];
     extent = data[4];
     framing = data.size() >= 7;
-    annular = data.size() == 8;
+    annular = data.size() == 8 || data.size() == 11;
+    crop_pose = data.size() == 11;
+    reference_angle = crop_pose ? std::atan2(data[9]-data[2],data[8]-data[1]) : 0.;
+    search = SearchStats();
     samples.clear(); sample_index = 0;
     minimum_radius = framing ? data[5] : 0.;
     max_radius = framing ? data[6] : radius;
@@ -149,17 +161,25 @@ public:
           safePath(path, sample_index ? Safe(bandSafe) : safe);
     }
     constexpr double pi = 3.14159265358979323846;
+    search = SearchStats();
     double best_cost = INFINITY;
     std::vector<Eigen::Vector2d> best_path;
-    for (int ring = 0; ring < 3; ++ring) {
+    // The fallback keeps the measured radius exactly; no shrinking search.
+    // Its five headings span +/-30 degrees around the actual capture position.
+    for (int ring = 0; ring < (crop_pose ? 1 : 3); ++ring) {
       const double r = std::min(max_radius, radius + .35 * ring);
       if (ring && r <= std::min(max_radius, radius + .35*(ring-1)) + 1e-8) continue;
-      for (int k = 0; k < 24; ++k) {
-        const double angle = k * pi / 12.;
+      for (int k = (crop_pose ? -2 : 0); k < (crop_pose ? 3 : 24); ++k) {
+        const double angle = reference_angle + k * pi / 12.;
         const Eigen::Vector2d entry = center + r * Eigen::Vector2d(std::cos(angle), std::sin(angle));
-        if (!bandSafe(entry) || !visible(entry, clear)) continue;
+        ++search.generated;
+        if (!bandSafe(entry)) continue;
+        ++search.safe;
+        if (!visible(entry, clear)) continue;
+        ++search.visible;
         std::vector<Eigen::Vector2d> access;
         if (!route(entry, access) || !safePath(access, safe)) continue;
+        ++search.access;
         double access_cost = 0.;
         for (size_t i=1;i<access.size();++i) access_cost += (access[i]-access[i-1]).norm();
         for (int sign : {-1, 1}) {
@@ -168,14 +188,20 @@ public:
           // A short 30-degree arc, with a center-facing sample every 15 degrees.
           // Never demand a complete circle through walls or unknown space.
           for (int j=1;j<=2;++j) {
+            if (crop_pose && std::abs(k+sign*j)>2) break;
             const double a = angle + sign*j*pi/12.;
             const Eigen::Vector2d p = center + r * Eigen::Vector2d(std::cos(a), std::sin(a));
             if (!bandSafe(p) || !visible(p, clear) || !safePath({candidate.back(), p}, bandSafe)) break;
+            // At close capture distances, adjacent 15-degree samples can
+            // share the same 0.20m arrival disc. Skip that intermediate point
+            // rather than claiming two observations without any translation.
+            if (crop_pose && (p-candidate.back()).norm() <= .4001) continue;
             cost += (p-candidate.back()).norm(); candidate.push_back(p);
           }
           // At least two distinct observation positions. Prefer the complete
           // short arc; a one-segment arc remains useful in narrow free space.
           if (candidate.size() < 2) continue;
+          ++search.arcs;
           cost += candidate.size() == 2 ? .5 : 0.;
           if (cost < best_cost) { best_cost=cost; samples=candidate; best_path=access; }
         }

@@ -506,6 +506,9 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if getattr(view_cfg, 'choice_review', False):
                 from vlm.choice_review import ChoiceTargetReviewer
                 reviewer_class = ChoiceTargetReviewer
+            if getattr(view_cfg, 'crop_pose_fallback', False):
+                from vlm.crop_pose_review import CropPoseTargetReviewer
+                reviewer_class = CropPoseTargetReviewer
             view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
                 label.split("|")[0].strip(), review_verifier or itmclient.itm_score,
@@ -602,14 +605,22 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
                     node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
                     continue
 
-                if view is not None and node.global_action in (ACTION.INSPECT, ACTION.INSPECTION_FAILED):
+                if view is not None and node.global_action in (ACTION.INSPECT, ACTION.INSPECTION_FAILED, ACTION.INSPECTION_NO_ROUTE):
                     reachable = node.global_action == ACTION.INSPECT
+                    initial_unavailable = node.global_action == ACTION.INSPECTION_NO_ROUTE
                     node.global_action = None
                     if getattr(view_cfg, 'confidence_review', False):
                         node.wait_for_associations()
-                    decision = view.finish_inspection(reachable)
+                    decision = (view.finish_inspection(reachable, initial_unavailable=initial_unavailable)
+                                if getattr(view_cfg, 'crop_pose_fallback', False)
+                                else view.finish_inspection(reachable))
                     node.request_inspection([])
-                    node.submit_review(decision)
+                    if decision is None:
+                        # Clear the previous frozen planner instance first;
+                        # a fallback uses the same object ID and action budget.
+                        node.request_inspection(view.request())
+                    else:
+                        node.submit_review(decision)
                     # The latest real observation is reused; no free Habitat step.
                     node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
                     continue

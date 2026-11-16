@@ -228,6 +228,8 @@ def main():
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
     parser.add_argument("--frontier-look", action=argparse.BooleanOptionalAction, default=False,
                         help="Bind exploration goal heading to its boundary; turn on arrival (default off)")
+    parser.add_argument('--crop-pose-fallback', action='store_true',
+                        help='linked_choice: one fallback arc at best-crop capture radius (default off)')
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
@@ -265,6 +267,8 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
+    if args.crop_pose_fallback and args.review_profile != 'linked_choice':
+        parser.error('--crop-pose-fallback requires linked_choice')
     if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') and not args.step_sync:
         parser.error('linked_fused requires --step-sync')
     if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
@@ -376,6 +380,15 @@ def main():
             'answer': 'must_choose_one_relative_preference_not_confirmation',
             'cache': 'phase_candidate_ids_and_completed_individual_reviews',
             'navigation': 'original_approach_and_STOP;frontier_look_independent'}
+    if args.crop_pose_fallback:
+        command.append('+active_view.crop_pose_fallback=true')
+        spec['crop_pose_fallback'] = {
+            'trigger': 'primary_geometry_or_initial_route_unavailable_before_any_motion',
+            'radius': 'best_crop_capture_XY_to_current_candidate_center_exact',
+            'half_width_m': .25, 'half_arc_degrees': 30, 'sample_degrees': 15,
+            'minimum_radius_m': .6, 'maximum_radius_m': 4.5,
+            'max_fallbacks': 1, 'shares_original_inspection_budget': True,
+            'safety_visibility_and_Astar': 'unchanged'}
     if args.failure_videos:
         spec["video_policy"] = "failures"
     if args.dry_run:
