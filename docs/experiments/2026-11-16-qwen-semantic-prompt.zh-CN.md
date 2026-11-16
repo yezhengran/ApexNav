@@ -2,6 +2,27 @@
 
 2026-11-16用户授权：当前Q8-C2窗口100完成后，调整单物体类别复查和多候选相对选择的提示词，处理单座软包座椅与chair／couch，以及电视与画作歧义；仅重测432、446。原100已独立验收74/100，结果、图片、视频和账本均保留。两例都是couch，本次没有TV在线导航验证。
 
+## 最终两例结果（2026-11-16）
+
+实现／运行提交 `3f3dce98db0e03cbca6a906271361bad01cedbe4` 已推送并核对；两个固定身份首次完整运行均独立验收，**1／2成功**，相对旧Q8-C2的0／2新增432成功。Q2同两例2／2、原Q8同两例1／2。两例不是随机评测，旧100结果仍为74／100，不将本次成功替换到旧行。
+
+| episode | 旧Q8-C2 | 新提示词结果 | 新步数 | 最终任务距离 | 新观测动作 | 新类别调用／联合复查 |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| 432 | 失败，45步／1.7714米 | **成功** | 122 | **0.0345米** | 39 | 5／2 |
+| 446 | 失败，40步／3.0274米 | 失败（false positive） | 46 | 3.1568米 | 9 | 3／1 |
+
+两例首张实际输入crop哈希均与旧Q8-C2完全相同：432候选3第20步从confirmed／0.95变为uncertain／0.40；446候选1第15步从confirmed／0.85变为uncertain／0.60。两者质量仍adequate，符合“图清晰但类别不确定”的设计。新8次类别回答全部uncertain，代码未硬改模型决策或分数。
+
+432之后候选8联合3图仍uncertain／0.75、候选7联合5图uncertain／0.65，最终原导航到达任务成功；导航成功不等于Qwen已确认。446候选1观测9动作、联合3图后仍uncertain／0.60；后续候选7初审0.60不确定、无安全观测点，最终动作0停下且离任务目标3.1568米，未改善成功率。此轮没有更改靠近／STOP规则，不能将该失败称为模型confirmed造成；也不把评测标签false positive直接等同视觉误认。
+
+共8次逻辑调用／8次单次HTTP，3次联合复查共11图（2次含新视角），48观测动作，0多候选比较／0网络重试／0回合恢复。**两处提示词都已实现，但候选比较新文本本轮只通过mock／严格HTTP审计测试，没有实际在线触发；TV也没有在线导航验证。** 单次云端回答有波动，这两例不构成总体SR或泛化结论。
+
+本次SR50%、SPL14.2631%、SoftSPL29.8595%。新增费用0.011814元，共享账本3.222627／20，所有历史预留保持。仅446失败视频保留，47帧独立完整解码；432成功临时视频已删除，全部API输入、Top5原件与回执保留。
+
+独立验收 `experiment_notes/qwen-semantic-prompt-diagnostic2-20261116/independent-validation.json`；新旧首图／回答与逐例汇总在同目录 `delivery/summary.json`，失败视频绝对路径索引在 `delivery/failure-videos.csv`。视频：`outputs/runs/qwen-semantic-prompt-diagnostic2-20261116/g0446/false positive/VBzV5z6i1WS.basis.glb_26.mp4`。
+
+203运行源、641完整overlay和62,191旧文件均通过冻结核验。模型加载后MemAvailable4,725,572KiB，通过2.5GiB门槛。控制器／评测／规划器／四模型均已退出；不重跑旧入口或扩展回合，最终交付后暂停objectnav-100等待用户。
+
 ## 实现与实验变量
 
 同分支 `codex/objectnav-annular-top5`，简称 **Q8-C2-semantic-v1**，显式开启 `--qwen-prompt-policy semantic_guard_v1`。默认 `legacy` 的旧提示词字节与命令行为保持；未知policy拒绝。类别复查（单图、联合1–5图）与候选比较共用提示词构造函数，policy写入真实配置、experiment.json、每次HTTP账本与模型回答元数据，并随prompt哈希严格审计。
@@ -23,7 +44,7 @@
 
 固定HM3Dv2 val全局432、446（局部episode1分别映射CLI431、445），seed100、500步、step_sync、linked_choice；crop-pose-fallback／crop-pose-single-view／choice-no-frontier开启，frontier-look关闭。每例首个完整结果唯一纳入，不替换旧100行，不选择性重跑失败，不扩大到其他回合。
 
-唯一新控制 `experiment_notes/qwen-semantic-prompt-diagnostic2-20261116/launch.sh`，新输出 `outputs/runs/qwen-semantic-prompt-diagnostic2-20261116/gNNNN/`；started及原独占锁防重复。**当前仅完成离线准备，尚未启动这两例。** 实际状态以该目录round-status／results及真实进程为准。旧入口全部停止。
+唯一新控制 `experiment_notes/qwen-semantic-prompt-diagnostic2-20261116/launch.sh`，新输出 `outputs/runs/qwen-semantic-prompt-diagnostic2-20261116/gNNNN/`；started及原独占锁防重复。**两例现已完成并独立验收，不得重复启动。** 实际状态以该目录round-status／results及真实进程为准。旧入口全部停止。
 
 仍只保留完整失败视频steps+1，成功删临时视频；所有API输入、来源、回执、网络未完成partial及attempt保留。逐例审核唯一身份／完成attempt／最后episode_end、Top5像素、簇回执、几何、HTTP图片和prompt链、失败视频完整解码；结束先停四模型，再独立复验。加载模型后MemAvailable至少2.5GiB。
 
@@ -36,4 +57,4 @@
 | 432 | 成功 | 成功 | 失败 | 45步／1.7714米 |
 | 446 | 成功 | 失败 | 失败 | 40步／3.0274米 |
 
-两例重测结果待运行及独立验收后填写。它们是按已知失败选取的诊断，不代表一般成功率；云端同图回答可变化，不能把单次差异全部解释成提示词的确定因果。TV提示词无本轮在线验证。
+两例新结果见上方最终结果。它们是按已知失败选取的诊断，不代表一般成功率；云端同图回答可变化，不能把单次差异全部解释成提示词的确定因果。TV提示词无本轮在线验证。
