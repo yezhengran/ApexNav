@@ -1,6 +1,10 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q8_VERSIONS_START -->
+**2026-11-16最新状态：Q8-C两例诊断完成，用户要求暂不进行401–500。** 该批没有启动，禁止把旧计划当恢复授权；全部评测／规划器／控制器／四模型退出，小时跟进保持暂停。Q8-C=`linked_choice`，同分支`codex/objectnav-annular-top5`，实现并运行提交`de1bc6a`，198源`4fec3d014a1f…`，独立六包overlay `outputs/build/annular-choice-full-20261116/install`。新增“原融合资格或最佳目标crop>0.7”单物体入口；多候选比较仅400步前多个已确认或400步后无已确认时强制选最佳，不修改类别确认／真实分数；本批frontier-look关闭。
+
+**Q8-C-diagnostic2：459／462均失败，0/2，182／187步，最终任务目标距离1.7213／1.7870米。** 4次Qwen初审均不确定且质量不足，4次观测请求均`no_safe_viewpoint`，0观测动作／0联合复查／0多候选比较。两例均400步前结束且无确认，不满足比较门槛。独立验收371视频帧、身份／来源／HTTP链通过，旧证据不变；新增0.004338元，账本2.976696/20元，0网络重试／恢复。控制与独立验收在`experiment_notes/qwen-choice-diagnostic2-20261116/`；401–500预备目录尚未冻结验收，不能直接启动。见[诊断报告](experiments/2026-11-16-qwen-choice-diagnostic2.zh-CN.md)。另已离线完成[459／462环带与采样分析](experiments/2026-11-16-qwen-choice-annuli-analysis.zh-CN.md)：每请求72几何点、至少2点短弧；未保存占据图和逐点原因，不能断言单个安全点也不存在。未改选点规则。下方全部启动与恢复描述仅历史。
+
 **2026-11-16用户授权的新改动已完成：Q8可选前沿目标朝向。** `--frontier-look`开启、`--no-frontier-look`或省略关闭；最终探索目标绑定自身边界最宽可见角区间，到达后核验并转向，退化时取未知侧法向；物体靠近／Qwen／环带观测优先。仍为`codex/objectnav-annular-top5`，独立新overlay `outputs/build/frontier-oriented-20261116/install`依赖原完整Q8 overlay；191源`fee38e45…`。C++几何回归、34项Python回归、真实ROS开关与同步握手2项及独立构建通过，**尚无开关后的SR评测**。旧Q2/Q8原件保持，全部评测／模型退出，自动跟进继续暂停。详见[开关实现](experiments/2026-11-16-qwen-frontier-heading.zh-CN.md)。
 
 同次已完成[400–500的27例失败分析](experiments/2026-11-16-qwen-annular-window-failures.zh-CN.md)：toilet9、plant7、couch6、chair3、tv2；17例候选STOP未达标、3例无可通行前沿后极限回退STOP、4例受阻、3例超时。7例曾进<0.20米却未当时停止。只归因与距离，无新修改建议；旧窗口全部frontier-look关闭，不将新实现归为旧成绩来源。
