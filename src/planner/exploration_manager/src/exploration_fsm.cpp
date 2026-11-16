@@ -4,6 +4,7 @@
 #include <exploration_manager/exploration_data.h>
 #include <vis_utils/planning_visualization.h>
 #include <plan_env/review_rank.h>
+#include <exploration_manager/candidate_choice.h>
 
 using namespace std::chrono_literals;
 
@@ -28,6 +29,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
     node_->declare_parameter("review.fused", false);
     node_->declare_parameter("review.confidence", false);
     node_->declare_parameter("review.annular", false);
+    node_->declare_parameter("review.choice", false);
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("navigation.step_sync", step_sync_);
@@ -41,6 +43,10 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   node_->get_parameter("review.fused", review_fused_);
   node_->get_parameter("review.confidence", review_confidence_);
   node_->get_parameter("review.annular", review_annular_);
+  node_->get_parameter("review.choice", review_choice_);
+  if (review_choice_ && !review_annular_) throw std::invalid_argument("Choice requires annular review");
+  comparison_pending_ = false; comparison_request_ = 0;
+  comparison_candidates_.clear(); comparison_revisions_.clear(); comparison_cache_.clear();
   if (review_annular_ && !review_confidence_)
     throw std::invalid_argument("Annular review requires confidence review");
   if (review_confidence_ && (!review_fused_ || review_late_step_ != 400))
@@ -81,6 +87,7 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   expl_manager_->object_map2d_->fused_review_gating_ = review_fused_;
   expl_manager_->object_map2d_->confidence_review_ = review_confidence_;
   expl_manager_->object_map2d_->annular_review_ = review_annular_;
+  expl_manager_->object_map2d_->choice_review_ = review_choice_;
   visualization_.reset(new PlanningVisualization(node_));
   fp_->vis_scale_ = expl_manager_->sdf_map_->getResolution() * FSMConstants::VIS_SCALE_FACTOR;
 
@@ -143,6 +150,13 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
         inspection_candidates_.clear();
         if (review_fused_)
           for (int id : msg->inspection_candidate_ids) if (id > 0) inspection_candidates_.insert(id - 1);
+        comparison_candidates_.clear();
+        auto map = expl_manager_->object_map2d_;
+        map->crop_review_candidates_.clear();
+        if (review_choice_) {
+          for (int id : msg->crop_candidate_ids) if (id > 0) map->crop_review_candidates_.insert(id - 1);
+          for (int id : msg->comparison_candidate_ids) if (id > 0) comparison_candidates_.insert(id - 1);
+        }
         evidence_revisions_.clear();
         for (size_t i = 0; i < msg->candidate_ids.size(); ++i)
           if (msg->candidate_ids[i] > 0 && msg->revisions[i] <= msg->observation_id)
@@ -211,9 +225,30 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
           return;
         }
         // Same callback: the numeric answer is visible before replan/ack.
+        ++comparison_revisions_[review_pending_id_];
         map->qwen_confidences_[review_pending_id_] = msg->target_confidence;
         acceptReviewResult(msg->candidate_id, msg->decision);
         map->logCandidateScores(msg->observation_id);
+      });
+
+  comparison_pub_ = node_->create_publisher<plan_env::msg::CandidateComparison>("/habitat/comparison_request", 10);
+  comparison_ack_pub_ = node_->create_publisher<plan_env::msg::CandidateComparison>("/habitat/comparison_ack", 10);
+  comparison_sub_ = node_->create_subscription<plan_env::msg::CandidateComparison>(
+      "/habitat/comparison_result", 10, [this](const plan_env::msg::CandidateComparison::SharedPtr msg) {
+        if (!review_choice_ || !validComparisonReceipt(comparison_pending_, msg->episode_token, comparison_message_.episode_token,
+            msg->observation_id, comparison_message_.observation_id, msg->request_id, comparison_message_.request_id,
+            msg->candidate_ids, comparison_message_.candidate_ids, msg->selected_candidate)) {
+          RCLCPP_ERROR(node_->get_logger(), "Invalid/stale comparison result"); return;
+        }
+        comparison_cache_[comparison_key_] = msg->selected_candidate - 1;
+        expl_manager_->object_map2d_->comparison_preferred_ = msg->selected_candidate - 1;
+        comparison_pending_ = false;
+        fd_->newest_action_ = comparison_resume_action_;
+        fd_->final_result_ = FINAL_RESULT::EXPLORE;  // Never STOP at the previous object's goal.
+        review_replan_ = true;
+        RCLCPP_INFO(node_->get_logger(), "[Comparison selected] request=%u id=%d step=%d",
+            msg->request_id, msg->selected_candidate, review_step_);
+        comparison_ack_pub_->publish(*msg);
       });
 
   /* ROS2 Publisher */
@@ -408,6 +443,10 @@ int ExplorationFSM::callActionPlanner()
   // Inspection is a bounded detour, never a REACH_OBJECT/STOP condition.
   // With no request the original planner takes exactly the baseline path.
   if (active_view_.id) { frontier_view_.cancel(); return planInspection(); }
+
+  // Compare before arrival testing so a newly selected object cannot inherit
+  // the old goal's STOP. No extra Habitat motion is consumed by the handshake.
+  if (maybeCompareCandidates()) { frontier_view_.cancel(); return FINAL_RESULT::EXPLORE; }
 
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
@@ -682,6 +721,48 @@ bool ExplorationFSM::maybeReviewStop()
   RCLCPP_INFO(node_->get_logger(), "[Stop review trigger] id=%d reason=%s step=%d", id + 1,
       conflict ? "category_conflict" : "missing_current_evidence", review_step_);
   return requestReview(id, selected_mode_, info, true);
+}
+
+bool ExplorationFSM::maybeCompareCandidates()
+{
+  if (!review_choice_ || review_pending_id_ >= 0 || active_view_.id) return false;
+  if (comparison_pending_) throw std::runtime_error("Comparison handshake still pending");
+  auto map = expl_manager_->object_map2d_;
+  const bool late = review_step_ >= 400;
+  vector<ChoiceCandidate> candidates;
+  for (int id : comparison_candidates_) {
+    const int status = map->reviewState(id);
+    Vector2d goal; vector<Vector2d> path;
+    candidates.push_back({id, status == ObjectMap2D::CONFIRMED, status == ObjectMap2D::REJECTED,
+        status != ObjectMap2D::REJECTED && expl_manager_->candidatePath(fd_->start_pt_, id, goal, path)});
+  }
+  auto ids = comparisonPool(review_step_, candidates);
+  if (ids.empty()) {
+    map->comparison_preferred_ = -1;
+    return false;
+  }
+  string key = late ? "late" : "confirmed";
+  for (int id : ids) key += ":" + std::to_string(id) + "/" + std::to_string(comparison_revisions_[id]);
+  auto cached = comparison_cache_.find(key);
+  if (cached != comparison_cache_.end()) {
+    if (expl_manager_->ed_->selected_object_id_ != cached->second) fd_->final_result_ = FINAL_RESULT::EXPLORE;
+    map->comparison_preferred_ = cached->second;
+    return false;
+  }
+  map->comparison_preferred_ = -1;
+  comparison_key_ = key;
+  comparison_message_ = plan_env::msg::CandidateComparison();
+  comparison_message_.episode_token = map->evidence_episode_token_;
+  comparison_message_.observation_id = review_step_;
+  comparison_message_.request_id = ++comparison_request_;
+  for (int id : ids) comparison_message_.candidate_ids.push_back(id + 1);
+  comparison_pending_ = true;
+  comparison_resume_action_ = fd_->newest_action_;
+  fd_->newest_action_ = ACTION::COMPARE_CANDIDATES;
+  RCLCPP_INFO(node_->get_logger(), "[Comparison request] request=%u candidates=%zu phase=%s step=%d",
+      comparison_request_, ids.size(), late ? "late_unconfirmed" : "multiple_confirmed", review_step_);
+  comparison_pub_->publish(comparison_message_);
+  return true;
 }
 
 bool ExplorationFSM::maybeReviewAutomatic()

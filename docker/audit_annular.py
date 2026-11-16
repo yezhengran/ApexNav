@@ -14,7 +14,7 @@ from PIL import Image
 from vlm.active_view import crop_target
 from vlm.annular_review import effective_decision
 from vlm.framing_review import object_envelope, framing_distance
-from vlm.qwen_review import CONFIDENCE_PROMPT, MULTIVIEW_PROMPT
+from vlm.qwen_review import CONFIDENCE_PROMPT, MULTIVIEW_PROMPT, CHOICE_PROMPT
 
 
 def sha(path):
@@ -106,11 +106,15 @@ def validate_call(event, ledger, target, ordinal):
     return ids
 
 
-def validate_source(attempt, source, receipt, trace, sensor, crop=True):
+def validate_source(attempt, source, receipt, trace, sensor, crop=True, comparison=False):
     ident, obs, mask_index = source['candidate'], source['observation'], source['mask_index']
     path = Path(source['source_file'])
     assert path.resolve().parent == attempt.resolve()
-    if crop:
+    if comparison:
+        assert path == attempt / (f'comparison-{source["request_id"]:03d}-'
+                    f'{source["round_index"]:02d}-{source["offset"]:03d}-{ident:03d}.npz')
+        assert Path(source['crop']) == path.with_suffix('.png')
+    elif crop:
         assert path == attempt / (f'candidate-{ident:03d}-{source["phase"]}-'
                      f'{0 if source["phase"] == "fused_first" else 1:02d}-{source["image_index"]:02d}.npz')
         assert Path(source['crop']) == path.with_suffix('.png')
@@ -151,11 +155,43 @@ def video_audit(run, row):
     return dict(path=str(path), frames=count, fps=fps, sha256=sha(path))
 
 
+def validate_comparison_http(event, ledger, target):
+    reply=event['model_reply']; ids=event['candidate_ids']; bill=ledger['calls'][reply['call_id']]
+    assert 2 <= len(ids) <= 5 and len(set(ids)) == len(ids)
+    assert event['outcome'] == reply['answer']['outcome'] == 'selected'
+    assert event['selected_candidate'] == reply['answer']['candidate_id'] in ids
+    assert type(reply['answer']['candidate_id']) is int
+    hashes=[sha(p) for p in event['crops']]
+    prompt=CHOICE_PROMPT.format(target=target,ids=ids)
+    expected=dict(image_count=len(ids), image_sha256s=hashes, image_sha256=hashes[0],
+                  candidate_ids=ids, image_selection='candidate_best_comparison_v1',
+                  target=target, prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
+    attempts=reply['transport_attempt_ids']
+    assert 1 <= len(attempts) <= 3 and len(set(attempts))==len(attempts) and attempts[-1]==reply['call_id']
+    for n,call in enumerate(attempts,1):
+        entry=ledger['calls'][call]
+        assert all(entry[k]==v for k,v in expected.items())
+        assert entry['request_id']==reply['request_id'] and entry['transport_attempt']==n
+        assert entry['transport_attempt_ids']==attempts[:n]
+        if n<len(attempts):
+            assert entry['state']=='error' and entry['error_stage']=='transport'
+            assert entry['transport']['retryable'] and entry['charged_cny']==.02
+            assert entry['retry_scheduled'] and entry['retry_delay_seconds']==(2,5)[n-1]
+    assert all(reply[k]==v for k,v in expected.items())
+    assert bill['state']==reply['state']=='completed' and bill['http_status']==200
+    assert bill['answer']==reply['answer'] and bill['charged_cny']==reply['charged_cny']
+    assert abs(bill['charged_cny']-(bill['usage']['prompt_tokens']+10*bill['usage']['completion_tokens'])/1e6)<1e-12
+    return attempts
+
+
 def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     assert events and events[-1]['event'] == 'episode_end'
     assert sum(e['event'] == 'episode_end' for e in events) == 1
     assert not any(e['event'] in ('association_missing', 'stop_review_started') for e in events)
     sensor = SimpleNamespace(**cfg['habitat']['simulator']['agents']['main_agent']['sim_sensors']['depth_sensor'])
+    choice = bool(cfg.get('active_view',{}).get('choice_review',False))
+    comparisons=[]; comparison_requests={}; comparison_groups={}; comparison_finished={}; comparison_keys=set()
+    comparison_sources=None; decisions={}; trigger_checks={}
     receipts = {}; histories = collections.defaultdict(list); pending = []
     calls = []; counts = collections.Counter(); first = {}; requested = {}; facing = {}; arrivals = {}
     geo_sources = collections.defaultdict(list); geometry = {}; actions = []; used = collections.defaultdict(set)
@@ -169,8 +205,20 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert e['eligible'] == (e['label'] == 0 and e['pixels'] >= 64 and e['short_side'] >= 8)
             assert math.isfinite(e['detector_score']) and 0 <= e['detector_score'] <= 1
             histories[ident].append(e); validate_pool(histories[ident], e)
+        elif e['event'] == 'choice_trigger_check':
+            assert choice
+            pool=ranked(histories[ident]);crop=bool(pool and pool[0]['detector_score']>.7)
+            assert e['crop_threshold']==.7 and e['crop_passed']==crop
+            assert e['allowed']==(e['fused_confidence']>=e['threshold'] or crop)
+            trigger_checks[ident]=e
         elif e['event'] == 'fused_review_started':
-            assert ident not in first and e['fused_confidence'] >= e['threshold']
+            assert ident not in first
+            if choice:
+                check=trigger_checks[ident]
+                assert check['allowed'] and check['step']==e['step']
+                assert check['fused_confidence']==e['fused_confidence'] and check['threshold']==e['threshold']
+            else:
+                assert e['fused_confidence'] >= e['threshold']
             first[ident] = e
         elif e['event'] == 'annular_geometry_source':
             envelope, shape = validate_source(attempt, e, receipts[ident, e['observation'], e['mask_index']], trace, sensor, False)
@@ -197,8 +245,13 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert e['reason'] == 'no_reachable_confirmed_alternative'
             requested[ident] = e
         elif e['event'] == 'inspection_evidence':
-            assert ident in requested and e['action'] in (1, 2, 3)
-            assert e['action'] == trace[e['step']]['action']
+            assert ident in requested and e['action']==trace[e['step']]['action']
+            if e['action']==0:
+                assert e['step']==int(row['steps'])==500 and trace[-1]['action']==0
+                assert trace[-1]['pose']==trace[-2]['pose']
+                assert any(x['event']=='review_finished' and x.get('reason')=='episode_ended_during_inspection' for x in events)
+                assert not any(x['event']=='verification' and x['step']>=e['step'] for x in events)
+            else:assert e['action'] in (1,2,3)
             actions.append(e)
         elif e['event'] == 'inspection_framing_arrival':
             pose = trace[e['step']]['pose']; request = requested[ident]
@@ -220,6 +273,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             pending.append(e)
         elif e['event'] == 'verification':
             assert ident in first and e['backend'] == 'qwen' and e['score'] is None
+            decisions[ident]=e['decision']
             counts[ident] += 1; ordinal = counts[ident]
             validate_inputs(e, pending, histories[ident], ordinal)
             if ordinal == 2:
@@ -235,7 +289,56 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
                               effective_decision=e['effective_decision'], reply=e['model_reply'],
                               http_attempts=len(ids), image_count=e['image_count'], new_view_images=e['new_view_images']))
             pending = []
-    assert not pending and sum(counts.values()) == events[-1]['vlm_calls']
+        elif e['event'] == 'comparison_requested':
+            assert choice and e['request_id']==len(comparison_requests)+1
+            ids=e['candidate_ids'];assert len(ids)>=2 and ids==sorted(set(ids))
+            assert all(ranked(histories[i]) and decisions.get(i)!=3 for i in ids)
+            if e['step']<400:assert all(decisions.get(i)==1 for i in ids)
+            else:assert not any(v==1 for v in decisions.values())
+            key=(e['step']>=400,tuple((i,counts[i]) for i in ids))
+            assert key not in comparison_keys;comparison_keys.add(key)
+            comparison_requests[e['request_id']]=e;comparison_groups[e['request_id']]=[]
+        elif e['event']=='comparison_sources':
+            assert choice and comparison_sources is None
+            comparison_sources=e
+        elif e['event']=='candidate_comparison':
+            assert choice and comparison_sources is not None
+            source_event=comparison_sources;comparison_sources=None
+            assert all(source_event[k]==e[k] for k in ('request_id','round_index','candidate_ids','sources','crops','step'))
+            request=comparison_requests[e['request_id']];assert request['step']==e['step']
+            assert len(e['sources'])==len(e['candidate_ids'])==len(e['crops'])
+            for i,source in enumerate(e['sources']):
+                c=source['candidate'];assert c==e['candidate_ids'][i] and source['crop']==e['crops'][i]
+                best=ranked(histories[c])[0]
+                assert (source['observation'],source['mask_index'],source['detector_score'])==(best['observation'],best['mask_index'],best['detector_score'])
+                assert source['detection_label']==0 and decisions.get(c)!=3
+                # Canonical path embeds the group offset; it is checked again in the tournament below.
+                match=re.fullmatch(r'comparison-(\d+)-(\d+)-(\d+)-(\d+)\.npz',Path(source['source_file']).name)
+                assert match and int(match[1])==e['request_id'] and int(match[2])==e['round_index'] and int(match[4])==c
+                metadata={**source,'request_id':e['request_id'],'round_index':e['round_index'],'offset':int(match[3])}
+                validate_source(attempt,metadata,receipts[c,source['observation'],source['mask_index']],trace,sensor,comparison=True)
+            attempts=validate_comparison_http(e,ledger,row['target'])
+            comparisons.append({**e,'http_attempts':len(attempts)})
+            comparison_groups[e['request_id']].append(e)
+        elif e['event']=='comparison_finished':
+            request=comparison_requests[e['request_id']]
+            assert e['request_id'] not in comparison_finished and e['candidate_ids']==request['candidate_ids'] and e['step']==request['step']
+            remaining=list(request['candidate_ids']); groups=iter(comparison_groups[e['request_id']]);round_index=0
+            while len(remaining)>1:
+                winners=[]
+                for offset in range(0,len(remaining),5):
+                    group=remaining[offset:offset+5]
+                    if len(group)==1:winners+=group;continue
+                    call=next(groups)
+                    assert call['candidate_ids']==group and call['round_index']==round_index
+                    assert all(Path(s['source_file']).name==f'comparison-{e["request_id"]:03d}-{round_index:02d}-{offset:03d}-{s["candidate"]:03d}.npz' for s in call['sources'])
+                    winners.append(call['selected_candidate'])
+                remaining=winners;round_index+=1
+            assert next(groups,None) is None and e['selected_candidate']==remaining[0] and e['outcome']=='selected'
+            comparison_finished[e['request_id']]=e
+    assert not pending and comparison_sources is None
+    assert set(comparison_requests)==set(comparison_finished)
+    assert sum(counts.values()) + len(comparisons) == events[-1]['vlm_calls']
     assert len(actions) == events[-1]['inspection_actions']
     assert all(n <= 2 for n in counts.values())
     assert all(sum(e['candidate'] == ident for e in actions) <= 48 for ident in requested)
@@ -277,7 +380,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
             assert group and [x[0] for x in group] == list(range(1, group[-1][1]+1))
             assert len({x[1] for x in group}) == 1 and group[-1][2] == call['step']
     assert all(f'[Conditional inspection trigger] id={ident} ' in planner for ident in requested)
-    return dict(calls=calls, inspection_candidates=sorted(requested), inspection_actions=len(actions),
+    return dict(comparisons=comparisons, calls=calls, inspection_candidates=sorted(requested), inspection_actions=len(actions),
                 inspection_motion_types=dict(collections.Counter(e['action'] for e in actions)),
                 review={k: events[-1].get(k, 0) for k in ('selected_targets', 'vlm_calls', 'vlm_seconds', 'confirmed', 'uncertain', 'rejected', 'pending_evidence', 'inspection_actions')},
                 events_sha256=sha(attempt/'events.jsonl'), video=video_audit(run, row))

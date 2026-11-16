@@ -50,6 +50,32 @@ MULTIVIEW_PROMPT = (
 ) + CONFIDENCE_PROMPT
 
 
+CHOICE_PROMPT = (
+    'These images show DIFFERENT candidate objects for target category {target}. '
+    'Image order corresponds exactly to candidate IDs {ids}. Compare visible evidence '
+    'and select the candidate most likely to belong to the target category. '
+    'Choose exactly ONE best candidate even when evidence is ambiguous: this is a '
+    'relative navigation preference, not proof that the target is present. Do not infer distance, reachability '
+    'or navigation success. Return JSON with exactly: outcome (selected), '
+    'candidate_id (the chosen integer ID), reason (short string). '
+    'A relative selection is not a semantic confirmation.'
+)
+
+
+def parse_choice(data, ids):
+    choice = data['choices'][0]
+    if choice['finish_reason'] != 'stop':
+        raise ValueError('Incomplete candidate comparison')
+    answer = json.loads(choice['message']['content'])
+    if set(answer) != {'outcome', 'candidate_id', 'reason'}:
+        raise ValueError('Unexpected comparison schema')
+    outcome, ident = answer['outcome'], answer['candidate_id']
+    if (outcome != 'selected' or type(ident) is not int or ident not in ids or
+            not isinstance(answer['reason'], str) or not 0 < len(answer['reason']) <= 2000):
+        raise ValueError('Invalid comparison choice')
+    return answer
+
+
 def read_credentials():
     """Read only two dotenv values as data; never execute or log the file."""
     values = {}
@@ -212,7 +238,14 @@ class QwenReviewer:
             raise ValueError('Multi-view confidence review requires 1 to 5 images')
         return self._request(images, target, multiview=True)
 
-    def _request(self, images, target, multiview):
+    def compare_candidates(self, images, target, candidate_ids):
+        if (not isinstance(candidate_ids, (list, tuple)) or not 2 <= len(candidate_ids) <= 5 or
+                len(images) != len(candidate_ids) or len(set(candidate_ids)) != len(candidate_ids) or
+                any(type(i) is not int or i < 1 for i in candidate_ids)):
+            raise ValueError('Comparison requires 2 to 5 distinct positive candidate IDs')
+        return self._request(images, target, multiview=True, candidate_ids=list(candidate_ids))
+
+    def _request(self, images, target, multiview, candidate_ids=None):
         if target not in ('chair', 'bed', 'couch', 'tv', 'potted plant', 'toilet'):
             raise ValueError('Unknown ObjectNav target')
         pngs = []
@@ -223,7 +256,8 @@ class QwenReviewer:
             Image.fromarray(rgb).save(image, format='PNG')
             pngs.append(image.getvalue())
         template = MULTIVIEW_PROMPT if multiview else (CONFIDENCE_PROMPT if self.target_confidence else PROMPT)
-        prompt = template.format(target=target, count=len(images))
+        prompt = (CHOICE_PROMPT.format(target=target, ids=candidate_ids) if candidate_ids is not None
+                  else template.format(target=target, count=len(images)))
         content = [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
                    base64.b64encode(png).decode()}} for png in pngs]
         content.append({'type': 'text', 'text': prompt})
@@ -246,7 +280,9 @@ class QwenReviewer:
             if multiview:
                 metadata.update(image_count=len(pngs),
                                 image_sha256s=[hashlib.sha256(png).hexdigest() for png in pngs],
-                                image_selection='candidate_top5_joint_v1')
+                                image_selection='candidate_best_comparison_v1' if candidate_ids is not None else 'candidate_top5_joint_v1')
+            if candidate_ids is not None:
+                metadata['candidate_ids'] = candidate_ids
             self._update(call_id, metadata)
             response, stage = None, 'transport'
             try:
@@ -271,9 +307,11 @@ class QwenReviewer:
                 cost = (inp + 10 * out) / 1e6
                 if cost > RESERVE_CNY:
                     raise ValueError('Cost exceeds reservation')
-                answer = parse_answer(data, self.target_confidence)
-                decision = answer['decision'] if answer['quality'] == 'adequate' else 'uncertain'
-                if target == 'potted plant' and self.plant_confirm_threshold is not None:
+                answer = (parse_choice(data, candidate_ids) if candidate_ids is not None
+                          else parse_answer(data, self.target_confidence))
+                decision = (answer['outcome'] if candidate_ids is not None else
+                            answer['decision'] if answer['quality'] == 'adequate' else 'uncertain')
+                if candidate_ids is None and target == 'potted plant' and self.plant_confirm_threshold is not None:
                     # Q6 plant policy: category score is the acceptance criterion,
                     # including uncertain/insufficient answers. Preserve the raw
                     # answer and record this local policy separately for audits.

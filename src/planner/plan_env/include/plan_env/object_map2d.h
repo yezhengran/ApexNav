@@ -7,6 +7,7 @@
 #include <Eigen/Eigen>
 #include <memory>
 #include <map>
+#include <set>
 #include <vector>
 #include <list>
 #include <utility>
@@ -126,6 +127,9 @@ public:
   bool fused_review_gating_ = false;
   bool confidence_review_ = false;
   bool annular_review_ = false;
+  bool choice_review_ = false;
+  std::set<int> crop_review_candidates_;
+  int comparison_preferred_ = -1;
   std::map<int, double> qwen_confidences_;
   double navigationRank(const ObjectCluster& object) const;
   bool candidateBefore(const ObjectCluster& a, const ObjectCluster& b) const;
@@ -135,6 +139,7 @@ public:
   int reviewState(int object_id) const;
   bool setReviewState(int object_id, int state, bool preserve_stop = false);
   bool reviewInfo(int object_id, vector<double>& data) const;
+  bool candidateCloud(int id, pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& cloud) const;
   void setLateReviewEligibility(bool enabled) { review_late_eligible_ = enabled; }
   void getObjects(
       vector<vector<Vector2d>>& clusters, vector<Vector2d>& averages, vector<int>& labels);

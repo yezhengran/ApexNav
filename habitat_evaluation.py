@@ -61,7 +61,7 @@ from habitat.utils.visualizations.utils import (
 )
 
 # ROS message imports
-from plan_env.msg import MultipleMasksWithConfidence, DetectionAssociation, ReviewEvidence, ScoredReviewResult
+from plan_env.msg import MultipleMasksWithConfidence, DetectionAssociation, ReviewEvidence, ScoredReviewResult, CandidateComparison
 
 # Local project imports
 from basic_utils.failure_check.count_files import count_files_in_directory
@@ -109,6 +109,13 @@ class HabitatEvalNode(Node):
         self.create_subscription(
             Int32, "/habitat/inspection_ack", self.inspection_ack_callback, qos)
 
+        self.comparison_request = None
+        self.comparison_ack = None
+        self.comparison_pub = self.create_publisher(CandidateComparison, '/habitat/comparison_result', qos)
+        self.create_subscription(CandidateComparison, '/habitat/comparison_request',
+                                 lambda msg: setattr(self, 'comparison_request', msg), qos)
+        self.create_subscription(CandidateComparison, '/habitat/comparison_ack',
+                                 lambda msg: setattr(self, 'comparison_ack', msg), qos)
         self.review_target = None
         self.review_ack = None
         self.linked_view = None
@@ -190,7 +197,29 @@ class HabitatEvalNode(Node):
         msg.conflicting_candidate_ids = conflicts
         if hasattr(view, "inspection_readiness"):
             msg.inspection_candidate_ids = view.inspection_readiness()
+        if hasattr(view, 'crop_ready'):
+            msg.crop_candidate_ids = view.crop_ready()
+            msg.comparison_candidate_ids = view.comparison_ready()
         self.evidence_pub.publish(msg)
+
+    def compare_candidates(self):
+        deadline = time.monotonic() + 5
+        while self.comparison_request is None:
+            if not rclpy.ok() or time.monotonic() > deadline:
+                raise RuntimeError('Missing comparison request')
+            rclpy.spin_once(self, timeout_sec=.05)
+        self.wait_for_associations()
+        msg, self.comparison_request = self.comparison_request, None
+        selected = self.linked_view.compare(list(msg.candidate_ids), msg.request_id,
+                                           msg.episode_token, msg.observation_id)
+        msg.selected_candidate = selected
+        self.comparison_ack = None
+        self.comparison_pub.publish(msg)
+        deadline = time.monotonic() + 5
+        while self.comparison_ack != msg:
+            if not rclpy.ok() or time.monotonic() > deadline:
+                raise RuntimeError('Candidate comparison handshake failed')
+            rclpy.spin_once(self, timeout_sec=.05)
 
     def review_ack_callback(self, msg):
         self.review_ack = msg.data
@@ -474,6 +503,9 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if getattr(view_cfg, 'annular_review', False):
                 from vlm.annular_review import AnnularTargetReviewer
                 reviewer_class = AnnularTargetReviewer
+            if getattr(view_cfg, 'choice_review', False):
+                from vlm.choice_review import ChoiceTargetReviewer
+                reviewer_class = ChoiceTargetReviewer
             view = reviewer_class(
                 view_cfg, cfg.habitat.simulator.agents.main_agent.sim_sensors.depth_sensor,
                 label.split("|")[0].strip(), review_verifier or itmclient.itm_score,
@@ -481,6 +513,8 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if reviewer_options:
                 node.linked_view = view
             node.inspection_request = None
+        node.comparison_request = None
+        node.comparison_ack = None
         node.review_target = None
         node.review_ack = None
 
@@ -551,6 +585,12 @@ def main(cfg: DictConfig, node: HabitatEvalNode, step_delay: float = 0.0) -> Non
             if node.global_action is not None:
                 if count_steps == max_episode_steps - 1:
                     node.global_action = ACTION.STOP
+
+                if view is not None and node.global_action == ACTION.COMPARE_CANDIDATES:
+                    node.global_action = None
+                    node.compare_candidates()
+                    node.publish_int32(node.state_pub, HABITAT_STATE.ACTION_FINISH)
+                    continue
 
                 if view is not None and node.global_action == ACTION.REVIEW_TARGET:
                     node.global_action = None

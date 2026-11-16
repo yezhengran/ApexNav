@@ -112,6 +112,9 @@ class FusedTargetReviewer(LinkedTargetReviewer):
             chosen['crop'] = np.asarray(thumbnail).copy()
         return chosen
 
+    def _first_review_allowed(self, ident, score, threshold):
+        return score >= threshold
+
     def begin(self, data):
         if len(data) != 11 or not np.isfinite(data).all() or data[-1] not in (self.FIRST, self.INSPECTION):
             raise ValueError('Fused review requires explicit first/inspection metadata')
@@ -122,7 +125,7 @@ class FusedTargetReviewer(LinkedTargetReviewer):
             raise ValueError('Invalid candidate identity/geometry')
         ident = int(ident)
         history = self._target_history(ident)
-        if phase == self.FIRST and (score < threshold or history['calls']):
+        if phase == self.FIRST and (not self._first_review_allowed(ident, score, threshold) or history['calls']):
             raise ValueError('First review requires fused threshold and no previous call')
         if phase == self.INSPECTION and ident not in self.inspection_readiness():
             raise ValueError('No pending inspection budget')

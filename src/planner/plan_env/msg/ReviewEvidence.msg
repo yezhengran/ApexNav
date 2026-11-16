@@ -8,3 +8,5 @@ int32[] reliable_candidate_ids
 int32[] conflicting_candidate_ids
 # Failed first reviews eligible for one conditional observation, fused profile only.
 int32[] inspection_candidate_ids
+int32[] crop_candidate_ids
+int32[] comparison_candidate_ids

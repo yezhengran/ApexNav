@@ -61,7 +61,8 @@ class AnnularTargetReviewer(FramingTargetReviewer):
             mask_index=e['key'][1], detector_score=e['score'], label=e['label'],
             pixels=e['pixels'], short_side=e['short_side'], pose=e['pose'],
             complete=e['complete'], eligible=self._eligible(e), retained=retained,
-            trigger='map_fusion_not_image_score', selection='strict_detector_top5',
+            trigger='map_fusion_or_detector_gt_0.7' if getattr(self.cfg, 'choice_review', False) else 'map_fusion_not_image_score',
+            selection='strict_detector_top5',
             retained_keys=[list(row['key']) for row in kept],
             retained_scores=[row['score'] for row in kept])
 
@@ -84,10 +85,11 @@ class AnnularTargetReviewer(FramingTargetReviewer):
         rows = self.frames.get(self.selected['id'], [])
         return self._load(min(rows, key=self._rank)) if rows else None
 
-    def _load(self, row):
+    def _load(self, row, candidate_id=None):
+        candidate_id = self.selected['id'] if candidate_id is None else candidate_id
         chosen = row.copy()
         with np.load(chosen['source_file'], allow_pickle=False) as packet:
-            if int(packet['candidate']) != self.selected['id'] or tuple(chosen['key']) != (
+            if int(packet['candidate']) != candidate_id or tuple(chosen['key']) != (
                     int(packet['observation']), int(packet['mask_index'])):
                 raise RuntimeError('Candidate image lineage mismatch')
             if not np.array_equal(packet['pose'], chosen['pose']) or not np.array_equal(packet['bounds'], chosen['bounds']):

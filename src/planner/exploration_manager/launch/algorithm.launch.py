@@ -24,6 +24,7 @@ def generate_launch_description():
     review_fused_arg = DeclareLaunchArgument('review_fused_', default_value='false')
     review_confidence_arg = DeclareLaunchArgument('review_confidence_', default_value='false')
     review_annular_arg = DeclareLaunchArgument('review_annular_', default_value='false')
+    review_choice_arg = DeclareLaunchArgument('review_choice_', default_value='false')
     frontier_look_arg = DeclareLaunchArgument('frontier_look_', default_value='false')
     review_late_step_arg = DeclareLaunchArgument('review_late_step_', default_value='350')
     review_lineage_arg = DeclareLaunchArgument('review_lineage_', default_value='false')
@@ -68,6 +69,7 @@ def generate_launch_description():
                 'review.fused': LaunchConfiguration('review_fused_'),
                 'review.confidence': LaunchConfiguration('review_confidence_'),
                 'review.annular': LaunchConfiguration('review_annular_'),
+                'review.choice': LaunchConfiguration('review_choice_'),
                 'navigation.frontier_look': LaunchConfiguration('frontier_look_'),
                 'review.late_step': LaunchConfiguration('review_late_step_'),
                 'review.lineage': LaunchConfiguration('review_lineage_'),
@@ -171,6 +173,7 @@ def generate_launch_description():
         review_fused_arg,
         review_confidence_arg,
         review_annular_arg,
+        review_choice_arg,
         frontier_look_arg,
         review_late_step_arg,
         review_lineage_arg,

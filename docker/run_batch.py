@@ -61,20 +61,22 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
         if review_profile != "legacy":
             command.extend(["active_view.recent_evidence=true",
                             f"active_view.turn_first={str(review_profile == 'evidence_turn').lower()}"])
-        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular"):
+        if review_profile in ("linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular", "linked_choice"):
             prefix = '+' if dataset != 'hm3dv2' else ''
             command.extend([f"{prefix}active_view.linked_evidence=true",
                             f"{prefix}active_view.stop_review={str(review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}"])
-        if review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular'):
+        if review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice'):
             command.append('+active_view.fused_review=true')
-        if review_profile in ('linked_confidence', 'linked_framing', 'linked_annular'):
+        if review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice'):
             command.append('+active_view.confidence_review=true')
         if review_profile == 'linked_framing':
             command.append('+active_view.framing_review=true')
             if review_backend == 'qwen':
                 command.append('+active_view.qwen_plant_confirm_threshold=0.6')
-        if review_profile == 'linked_annular':
+        if review_profile in ('linked_annular', 'linked_choice'):
             command.extend(['+active_view.framing_review=true', '+active_view.annular_review=true'])
+        if review_profile == 'linked_choice':
+            command.append('+active_view.choice_review=true')
         if review_profile == 'linked_early':
             command.extend(['+active_view.early_review=true',
                             f'+active_view.early_review_threshold={early_review_threshold}'])
@@ -230,7 +232,7 @@ def main():
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
     parser.add_argument("--seed", type=int, default=100)
-    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular"],
+    parser.add_argument("--review-profile", choices=["legacy", "evidence", "evidence_turn", "linked", "linked_stop", "linked_stop_preserve", "linked_early", "linked_fused", "linked_confidence", "linked_framing", "linked_annular", "linked_choice"],
                         default="legacy", help="Independent selected-review observation ablations")
     parser.add_argument('--early-review-threshold', type=float, default=None,
                         help='linked_early only: single-frame target detector score, default 0.65')
@@ -263,9 +265,9 @@ def main():
         parser.error("--episode-index requires --episodes 1 and a new diagnostic directory")
     if args.review_profile != "legacy" and args.method != "selected_review":
         parser.error("--review-profile requires --method selected_review")
-    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') and not args.step_sync:
+    if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') and not args.step_sync:
         parser.error('linked_fused requires --step-sync')
-    if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
+    if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') and (args.review_backend != 'qwen' or args.uncertain_after_steps != 400):
         parser.error('linked_confidence requires Qwen and --uncertain-after-steps 400')
     if args.review_profile == 'linked_early':
         if not args.step_sync:
@@ -277,7 +279,7 @@ def main():
     elif args.early_review_threshold is not None:
         parser.error('--early-review-threshold requires linked_early')
     if args.review_backend == 'qwen':
-        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular'):
+        if args.method != 'selected_review' or args.review_profile not in ('linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice'):
             parser.error('Qwen requires selected_review / linked_stop_preserve, linked_early or linked_fused')
         ledger = (ROOT / args.qwen_budget_ledger).resolve()
         if not args.qwen_budget_ledger or not ledger.is_file() or not ledger.is_relative_to(ROOT):
@@ -351,7 +353,7 @@ def main():
             'degenerate_heading': 'free_to_unknown_normal',
             'max_turns': 6, 'arrival_m': .5, 'rescan_separation_m': .75,
             'base_frontier_generation_and_routes': 'unchanged'}
-    if args.review_profile == 'linked_annular':
+    if args.review_profile in ('linked_annular', 'linked_choice'):
         spec['annular_review'] = {
             'candidate_memory': 'strict_top5_detector_score_per_mapper_id',
             'first_call': 'single_best_crop_at_original_fusion_threshold',
@@ -365,6 +367,15 @@ def main():
             'plant_policy': 'adequate_nonrejected_and_target_confidence_gte_0.60',
             'other_targets': 'structured_decision_with_adequate_quality',
             'baseline_navigation': 'pre_Q7_legacy', 'pitch_actions': False}
+    if args.review_profile == 'linked_choice':
+        spec['choice_review'] = {
+            'first_trigger': 'original_fusion_gate_OR_best_usable_target_crop_gt_0.7',
+            'early_comparison': 'step_lt_400_and_multiple_confirmed_reachable',
+            'late_comparison': 'step_gte_400_and_no_confirmed_and_multiple_reachable_nonrejected',
+            'images': 'one_best_per_mapper_id;groups_up_to5_then_winners',
+            'answer': 'must_choose_one_relative_preference_not_confirmation',
+            'cache': 'phase_candidate_ids_and_completed_individual_reviews',
+            'navigation': 'original_approach_and_STOP;frontier_look_independent'}
     if args.failure_videos:
         spec["video_policy"] = "failures"
     if args.dry_run:
@@ -463,15 +474,16 @@ def main():
                             ["ros2", "launch", "exploration_manager", "exploration.launch.py",
                              f"review_enabled:={str(args.method == 'selected_review').lower()}",
                              f"review_late_step:={args.uncertain_after_steps}",
-                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular')).lower()}",
+                             f"review_lineage:={str(args.review_profile in ('linked', 'linked_stop', 'linked_stop_preserve', 'linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice')).lower()}",
                              f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
                              *(['frontier_look:=true'] if args.frontier_look else []),
-                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') else []),
-                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular') else []),
-                             *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular') else []),
-                             *(['review_annular:=true'] if args.review_profile == 'linked_annular' else [])],
+                             *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
+                             *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
+                             *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
+                             *(['review_annular:=true'] if args.review_profile in ('linked_annular', 'linked_choice') else []),
+                             *(['review_choice:=true'] if args.review_profile == 'linked_choice' else [])],
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                         )
                     time.sleep(3)

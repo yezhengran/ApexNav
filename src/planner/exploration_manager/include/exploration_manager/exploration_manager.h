@@ -93,6 +93,7 @@ public:
   shared_ptr<KinoAstar> kinoastar_;           ///< Kinodynamic A* planner (for real-world)
 
   int reachableConfirmedTarget(const Vector3d& start);
+  bool candidatePath(const Vector3d& start, int id, Vector2d& goal, vector<Vector2d>& path);
 
   typedef shared_ptr<ExplorationManager> Ptr;
 

@@ -34,6 +34,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DetectionAssociation.msg"
   "msg/ReviewEvidence.msg"
   "msg/ScoredReviewResult.msg"
+  "msg/CandidateComparison.msg"
   "msg/NavigationObservation.msg"
   "srv/ApplyObservation.srv"
   DEPENDENCIES std_msgs sensor_msgs nav_msgs

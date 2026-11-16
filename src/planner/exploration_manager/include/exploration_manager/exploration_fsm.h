@@ -27,6 +27,7 @@
 #include <exploration_manager/frontier_view.h>
 #include <plan_env/msg/review_evidence.hpp>
 #include <plan_env/msg/scored_review_result.hpp>
+#include <plan_env/msg/candidate_comparison.hpp>
 #include <plan_env/srv/apply_observation.hpp>
 #include <exploration_manager/observation_sequence.h>
 #include <visualization_msgs/msg/marker.hpp>
@@ -84,7 +85,7 @@ struct FSMData;
 
 enum ROS_STATE { INIT, WAIT_TRIGGER, PLAN_ACTION, WAIT_ACTION_FINISH, PUB_ACTION, FINISH };
 enum ACTION { STOP, MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, TURN_DOWN, TURN_UP,
-              INSPECT, INSPECTION_FAILED, REVIEW_TARGET };
+              INSPECT, INSPECTION_FAILED, REVIEW_TARGET, COMPARE_CANDIDATES };
 enum HABITAT_STATE { READY, ACTION_EXEC, ACTION_FINISH, EPISODE_FINISH };
 
 class ExplorationFSM {
@@ -119,6 +120,18 @@ private:
   bool review_automatic_ = false, review_pending_automatic_ = false;
   bool review_confidence_ = false;
   bool review_annular_ = false;
+  bool review_choice_ = false;
+  bool comparison_pending_ = false;
+  uint32_t comparison_request_ = 0;
+  int comparison_resume_action_ = ACTION::STOP;
+  std::set<int> comparison_candidates_;
+  std::unordered_map<int, uint32_t> comparison_revisions_;
+  std::map<string, int> comparison_cache_;
+  string comparison_key_;
+  plan_env::msg::CandidateComparison comparison_message_;
+  rclcpp::Publisher<plan_env::msg::CandidateComparison>::SharedPtr comparison_pub_, comparison_ack_pub_;
+  rclcpp::Subscription<plan_env::msg::CandidateComparison>::SharedPtr comparison_sub_;
+  bool maybeCompareCandidates();
   bool review_fused_ = false, review_pending_inspection_ = false;
   std::set<int> inspection_candidates_;
   int inspection_suppressed_at_ = -1;

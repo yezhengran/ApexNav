@@ -754,6 +754,14 @@ bool ObjectMap2D::reviewInfo(int object_id, vector<double>& data) const
   return true;
 }
 
+bool ObjectMap2D::candidateCloud(int id, pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>& cloud) const
+{
+  if (id < 0 || id >= static_cast<int>(objects_.size()) || reviewState(id) == REJECTED) return false;
+  cloud.reset(new pcl::PointCloud<pcl::PointXYZ>());
+  for (const auto& cell : objects_[id].good_cells_) cloud->push_back(pcl::PointXYZ(cell(0), cell(1), 0));
+  return !cloud->empty();
+}
+
 bool ObjectMap2D::reviewEligible(int object_id, bool require_confidence) const
 {
   if (object_id < 0 || object_id >= static_cast<int>(objects_.size())) return false;
@@ -763,6 +771,8 @@ bool ObjectMap2D::reviewEligible(int object_id, bool require_confidence) const
     int score = object.observation_cloud_sums_[label] * object.confidence_scores_[label];
     if (score > max_func_score) { max_func_score = score; best_label = label; }
   }
+  if (choice_review_ && crop_review_candidates_.count(object_id) && !object.good_cells_.empty())
+    return true;  // Explicit detector >.7 OR original fusion/label/count gate.
   return best_label == 0 && !object.good_cells_.empty() &&
       object.observation_nums_[0] >= min_observation_num_ &&
       (!require_confidence || object.confidence_scores_[0] >= min_confidence_);

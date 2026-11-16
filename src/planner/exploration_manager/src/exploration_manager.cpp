@@ -100,6 +100,12 @@ int ExplorationManager::reachableConfirmedTarget(const Vector3d& start)
   return -1;
 }
 
+bool ExplorationManager::candidatePath(const Vector3d& start, int id, Vector2d& goal, vector<Vector2d>& path)
+{
+  pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>> cloud;
+  return object_map2d_->candidateCloud(id, cloud) && searchObjectPath(start, cloud, goal, path);
+}
+
 int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw)
 {
   Vector2d pos2d = Vector2d(pos(0), pos(1));
@@ -112,6 +118,13 @@ int ExplorationManager::planNextBestPoint(const Vector3d& pos, const double& yaw
   vector<pcl::shared_ptr<pcl::PointCloud<pcl::PointXYZ>>> object_clouds;
   vector<int> object_ids;
   ed_->selected_object_id_ = -1;
+  if (object_map2d_->choice_review_ && object_map2d_->comparison_preferred_ >= 0 &&
+      candidatePath(pos, object_map2d_->comparison_preferred_, ed_->next_pos_, ed_->next_best_path_)) {
+    ed_->selected_object_id_ = object_map2d_->comparison_preferred_;
+    RCLCPP_INFO(node_->get_logger(), "[Comparison approach] id=%d", ed_->selected_object_id_ + 1);
+    return object_map2d_->reviewState(ed_->selected_object_id_) == ObjectMap2D::CONFIRMED ?
+        SEARCH_BEST_OBJECT : SEARCH_SUSPICIOUS_OBJECT;
+  }
   if (object_map2d_->annularLate()) {
     // After the configured step budget, try confirmed objects first, then
     // unresolved scored objects in latest Qwen order, then unscored fusion.
