@@ -148,7 +148,7 @@ private:
   /* Action Planner */
   int callActionPlanner();
   int planInspection();
-  bool maybeLookAtFrontier(const Vector2d& position, double yaw, bool arrived);
+  bool maybeLookAtFrontier(const Vector2d& position, double yaw);
   bool maybeReviewSelected(int exploration_result);
   bool maybeReviewAutomatic();
   bool maybeReviewStop();

@@ -149,7 +149,8 @@ class BatchTest(unittest.TestCase):
         ledger.write_text(json.dumps(dict(limit_cny=20,initial_spent_cny=0,calls={})))
         base=[sys.executable,str(ROOT/'docker/run_batch.py'),'hm3dv2','--dry-run',
               '--method','selected_review','--review-profile','linked_annular',
-              '--review-backend','qwen','--uncertain-after-steps','400','--qwen-budget-ledger',str(ledger)]
+              '--review-backend','qwen','--uncertain-after-steps','400','--qwen-budget-ledger',str(ledger),
+              '--output',str(ROOT/'outputs/runs/frontier-switch-dry-test')]
         self.assertNotEqual(subprocess.run(base,capture_output=True).returncode,0)
         result=subprocess.run(base+['--step-sync'],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
@@ -162,7 +163,13 @@ class BatchTest(unittest.TestCase):
         self.assertEqual(extra.returncode,0,extra.stderr)
         enabled=json.loads(extra.stdout)
         self.assertEqual(enabled['command'],value['command'])
-        self.assertEqual(enabled['spec']['frontier_look']['max_turns'],3)
+        self.assertEqual(enabled['spec']['frontier_look']['max_turns'],6)
+        self.assertEqual(enabled['spec']['frontier_look']['policy'],
+                         'goal_bound_widest_visible_boundary_v2')
+        disabled=subprocess.run(base+['--step-sync','--no-frontier-look'],capture_output=True,text=True)
+        self.assertEqual(disabled.returncode,0,disabled.stderr)
+        self.assertEqual(json.loads(disabled.stdout)['spec'],value['spec'])
+        self.assertEqual(json.loads(disabled.stdout)['command'],value['command'])
 
     def test_early_review_is_explicit_and_does_not_use_stop_or_itm_threshold(self):
         command = evaluation_command('hm3dv2', 1, Path('/tmp/early'), True,

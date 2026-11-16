@@ -224,7 +224,8 @@ def main():
     parser.add_argument("--episode-index", type=int, default=-1,
                         help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
-    parser.add_argument("--frontier-look", action="store_true", help="Independent bounded arrival-facing ablation; default off")
+    parser.add_argument("--frontier-look", action=argparse.BooleanOptionalAction, default=False,
+                        help="Bind exploration goal heading to its boundary; turn on arrival (default off)")
     parser.add_argument("--dry-run", action="store_true", help="Print invocation; create/start nothing")
     parser.add_argument("--method", choices=["baseline", "selected_review"],
                         default="baseline")
@@ -345,8 +346,10 @@ def main():
     if args.step_sync:
         spec["navigation_step_sync"] = True
     if args.frontier_look:
-        spec['frontier_look'] = {'policy': 'visible_unknown_boundary_gain_per_turn',
-            'max_turns': 3, 'arrival_m': .5, 'rescan_separation_m': .75,
+        spec['frontier_look'] = {'policy': 'goal_bound_widest_visible_boundary_v2',
+            'heading_assignment': 'after_goal_selection; revalidate_on_arrival',
+            'degenerate_heading': 'free_to_unknown_normal',
+            'max_turns': 6, 'arrival_m': .5, 'rescan_separation_m': .75,
             'base_frontier_generation_and_routes': 'unchanged'}
     if args.review_profile == 'linked_annular':
         spec['annular_review'] = {
