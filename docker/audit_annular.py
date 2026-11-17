@@ -15,7 +15,7 @@ from vlm.active_view import crop_target
 from vlm.annular_review import effective_decision
 from vlm.framing_review import object_envelope, framing_distance
 from vlm.crop_pose_review import crop_pose_band
-from vlm.qwen_review import build_prompt, PROMPT_POLICIES
+from vlm.qwen_review import build_prompt, PROMPT_POLICIES, CHOICE_ID_POLICIES
 
 
 def sha(path):
@@ -165,7 +165,7 @@ def video_audit(run, row):
     return dict(path=str(path), frames=count, fps=fps, sha256=sha(path))
 
 
-def validate_comparison_http(event, ledger, target, prompt_policy='legacy'):
+def validate_comparison_http(event, ledger, target, prompt_policy='legacy', choice_id_policy='global_v1'):
     reply=event['model_reply']; ids=event['candidate_ids']; bill=ledger['calls'][reply['call_id']]
     assert 2 <= len(ids) <= 5 and len(set(ids)) == len(ids)
     assert event['outcome'] == reply['answer']['outcome'] == 'selected'
@@ -174,16 +174,31 @@ def validate_comparison_http(event, ledger, target, prompt_policy='legacy'):
     hashes=[sha(p) for p in event['crops']]
     assert prompt_policy in PROMPT_POLICIES
     assert reply.get('prompt_policy', 'legacy') == prompt_policy
-    prompt=build_prompt(target, candidate_ids=ids, policy=prompt_policy)
+    assert choice_id_policy in CHOICE_ID_POLICIES
+    assert reply.get('choice_id_policy', 'global_v1') == choice_id_policy
+    prompt=build_prompt(target, candidate_ids=ids, policy=prompt_policy, choice_id_policy=choice_id_policy)
     expected=dict(image_count=len(ids), image_sha256s=hashes, image_sha256=hashes[0],
                   candidate_ids=ids, image_selection='candidate_best_comparison_v1',
                   target=target, prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())
+    if choice_id_policy == 'image_order_v1':
+        expected.update(choice_id_policy=choice_id_policy, api_candidate_ids=list(range(1, len(ids) + 1)),
+                        candidate_id_map=[{'image_index': i, 'candidate_id': ident} for i, ident in enumerate(ids, 1)])
+        raw = reply['raw_answer']
+        assert set(raw) == {'outcome', 'candidate_id', 'reason'} and raw['outcome'] == 'selected'
+        assert type(raw['candidate_id']) is int and 1 <= raw['candidate_id'] <= len(ids)
+        assert isinstance(raw['reason'], str) and 0 < len(raw['reason']) <= 2000
+        assert reply['answer'] == {**raw, 'candidate_id': ids[raw['candidate_id'] - 1]}
+        assert json.dumps(bill['raw_answer'], sort_keys=True) == json.dumps(raw, sort_keys=True)
     attempts=reply['transport_attempt_ids']
     assert 1 <= len(attempts) <= 3 and len(set(attempts))==len(attempts) and attempts[-1]==reply['call_id']
     for n,call in enumerate(attempts,1):
         entry=ledger['calls'][call]
+        assert entry.get('choice_id_policy', 'global_v1') == choice_id_policy
         assert entry.get('prompt_policy', 'legacy') == prompt_policy
         assert all(entry[k]==v for k,v in expected.items())
+        if choice_id_policy == 'image_order_v1':
+            assert all(json.dumps(entry[k], sort_keys=True) == json.dumps(v, sort_keys=True)
+                       for k, v in expected.items())
         assert entry['request_id']==reply['request_id'] and entry['transport_attempt']==n
         assert entry['transport_attempt_ids']==attempts[:n]
         if n<len(attempts):
@@ -191,6 +206,9 @@ def validate_comparison_http(event, ledger, target, prompt_policy='legacy'):
             assert entry['transport']['retryable'] and entry['charged_cny']==.02
             assert entry['retry_scheduled'] and entry['retry_delay_seconds']==(2,5)[n-1]
     assert all(reply[k]==v for k,v in expected.items())
+    if choice_id_policy == 'image_order_v1':
+        assert all(json.dumps(reply[k], sort_keys=True) == json.dumps(v, sort_keys=True)
+                   for k, v in expected.items())
     assert bill['state']==reply['state']=='completed' and bill['http_status']==200
     assert bill['answer']==reply['answer'] and bill['charged_cny']==reply['charged_cny']
     assert abs(bill['charged_cny']-(bill['usage']['prompt_tokens']+10*bill['usage']['completion_tokens'])/1e6)<1e-12
@@ -204,10 +222,15 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
     sensor = SimpleNamespace(**cfg['habitat']['simulator']['agents']['main_agent']['sim_sensors']['depth_sensor'])
     prompt_policy = cfg.get('active_view', {}).get('qwen_prompt_policy', 'legacy')
     assert prompt_policy in PROMPT_POLICIES
+    choice_id_policy = cfg.get('active_view', {}).get('qwen_choice_id_policy', 'global_v1')
+    assert choice_id_policy in CHOICE_ID_POLICIES
+    if choice_id_policy != 'global_v1':
+        assert cfg.get('active_view', {}).get('choice_review', False)
     spec_path = run / 'experiment.json'
     if spec_path.exists():
         spec = json.loads(spec_path.read_text())
         assert spec.get('review', {}).get('prompt_policy', 'legacy') == prompt_policy
+        assert spec.get('review', {}).get('choice_id_policy', 'global_v1') == choice_id_policy
     choice = bool(cfg.get('active_view',{}).get('choice_review',False))
     crop_pose = bool(cfg.get('active_view',{}).get('crop_pose_fallback',False))
     assert not crop_pose or choice
@@ -379,7 +402,7 @@ def audit_evidence(run, attempt, events, row, cfg, trace, ledger):
                 assert match and int(match[1])==e['request_id'] and int(match[2])==e['round_index'] and int(match[4])==c
                 metadata={**source,'request_id':e['request_id'],'round_index':e['round_index'],'offset':int(match[3])}
                 validate_source(attempt,metadata,receipts[c,source['observation'],source['mask_index']],trace,sensor,comparison=True)
-            attempts=validate_comparison_http(e,ledger,row['target'],prompt_policy)
+            attempts=validate_comparison_http(e,ledger,row['target'],prompt_policy,choice_id_policy)
             comparisons.append({**e,'http_attempts':len(attempts)})
             comparison_groups[e['request_id']].append(e)
         elif e['event']=='comparison_finished':

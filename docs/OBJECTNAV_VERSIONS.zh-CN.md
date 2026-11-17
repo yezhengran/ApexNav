@@ -1,6 +1,8 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q8_VERSIONS_START -->
+**2026-11-17：Q8候选ID协议修复（image_order_v1，尚无新导航成绩）。** 同图诊断复现图片序号5与真实ID7混淆；新增显式局部ID到真实候选ID的映射，保留global_v1与单物体复检。201回归及CLI/Hydra通过；仅一次旧协议API诊断，新协议在线／导航尚未验证，前645不变。见[修复报告](experiments/2026-11-17-qwen-response-diagnostic.zh-CN.md)。
+
 **2026-11-17：Q8响应诊断补丁（无新评测成绩）。** 仅增加Qwen响应错误的固定校验阶段／错误码／脱敏正文与哈希，108离线回归通过；请求和决策规则不变。646真实错误仍待明确授权的单次API重放，当前645结果保留、评测停止，旧冻结入口不可重启。见[诊断记录](experiments/2026-11-17-qwen-response-diagnostic.zh-CN.md)。
 
 **2026-11-16最新授权：以Q8-C2-semantic-v1继续完成全部固定1000回合。** 保留前100正式结果81成功／19失败，101–1000共900例顺序新跑，调试432／446不混入。实际203源码f5fa79fc92c6…、semantic_guard_v1和641构建精确同前100，不改导航／模型／配置，frontier-look仍关；仅失败视频，原有界网络恢复与2.5GiB加载门槛保持。新唯一控制experiment_notes/qwen-semantic-full1000-20261116/launch.sh，日志outputs/runtime/qwen-semantic-full1000-20261116-launcher.log，started／原锁保护，启动与进度以新目录状态和实际进程为准；所有旧入口不可重复。Q2有完整1000同身份757成功；原Q8只比201历史交集。扩展账本起点3.485233/20，前100成本0.262606仅汇总不再次扣费。恢复每1h跟踪，全部1000独立验收后报告提交再暂停。见[完整集续跑协议](experiments/2026-11-16-qwen-semantic-full1000.zh-CN.md)。下方前100暂停／不扩展描述仅历史，已由本授权覆盖。

@@ -43,7 +43,13 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                        method="baseline", seed=100, confirm_threshold=0.65, reject_threshold=0.20,
                        uncertain_after_steps=350, episode_index=-1, review_profile="legacy",
                        review_backend="blip2", qwen_budget_ledger="", failure_videos=False, step_sync=False,
-                       early_review_threshold=0.65, qwen_prompt_policy="legacy"):
+                       early_review_threshold=0.65, qwen_prompt_policy="legacy",
+                       qwen_choice_id_policy="global_v1"):
+    if qwen_choice_id_policy not in ('global_v1', 'image_order_v1'):
+        raise ValueError('Unknown Qwen choice ID policy')
+    if qwen_choice_id_policy != 'global_v1' and (method != 'selected_review' or
+            review_backend != 'qwen' or review_profile != 'linked_choice'):
+        raise ValueError('Qwen choice ID policy requires selected_review / linked_choice / Qwen')
     if qwen_prompt_policy not in ("legacy", "semantic_guard_v1"):
         raise ValueError("Unknown Qwen prompt policy")
     if qwen_prompt_policy != "legacy" and (review_backend != "qwen" or method != "selected_review"):
@@ -89,6 +95,8 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
                             f'active_view.qwen_budget_ledger={qwen_budget_ledger}'])
             if qwen_prompt_policy != 'legacy':
                 command.append(f'+active_view.qwen_prompt_policy={qwen_prompt_policy}')
+            if qwen_choice_id_policy != 'global_v1':
+                command.append(f'+active_view.qwen_choice_id_policy={qwen_choice_id_policy}')
     if max_steps is not None:
         command.append(f"habitat.environment.max_episode_steps={max_steps}")
     if failure_videos:
@@ -252,6 +260,8 @@ def main():
     parser.add_argument('--review-backend', choices=['blip2', 'qwen'], default='blip2')
     parser.add_argument('--qwen-prompt-policy', choices=['legacy', 'semantic_guard_v1'], default='legacy',
                         help='Explicit semantic ambiguity guidance; legacy prompts remain unchanged')
+    parser.add_argument('--qwen-choice-id-policy', choices=['global_v1', 'image_order_v1'],
+                        default='global_v1', help='Use local image positions for candidate comparison IDs')
     parser.add_argument('--qwen-budget-ledger', default='',
                         help='Shared initialized local JSON ledger; never contains credentials')
     parser.add_argument("--reject-threshold", type=float, default=0.20)
@@ -259,6 +269,9 @@ def main():
     args = parser.parse_args()
     if args.qwen_prompt_policy != 'legacy' and (args.review_backend != 'qwen' or args.method != 'selected_review'):
         parser.error('--qwen-prompt-policy requires selected_review with Qwen')
+    if args.qwen_choice_id_policy != 'global_v1' and (args.method != 'selected_review' or
+            args.review_backend != 'qwen' or args.review_profile != 'linked_choice'):
+        parser.error('--qwen-choice-id-policy requires selected_review / linked_choice / Qwen')
     if args.network_episode_retries and args.review_backend != 'qwen':
         parser.error('--network-episode-retries requires Qwen')
     if args.failure_videos:
@@ -321,7 +334,7 @@ def main():
                                  args.reject_threshold, args.uncertain_after_steps,
                                  args.episode_index, args.review_profile,
                                  args.review_backend, args.qwen_budget_ledger, args.failure_videos, args.step_sync,
-                                 args.early_review_threshold, args.qwen_prompt_policy)
+                                 args.early_review_threshold, args.qwen_prompt_policy, args.qwen_choice_id_policy)
     spec = {"dataset": args.dataset, "episodes": args.episodes, "video": args.video,
             "method": args.method, "seed": args.seed,
             "llm_mode": "cached answers; no Ollama model loading"}
@@ -337,6 +350,8 @@ def main():
                               'uncertain_after_steps': args.uncertain_after_steps}
             if args.qwen_prompt_policy != 'legacy':
                 spec['review']['prompt_policy'] = args.qwen_prompt_policy
+            if args.qwen_choice_id_policy != 'global_v1':
+                spec['review']['choice_id_policy'] = args.qwen_choice_id_policy
     if args.max_steps is not None:
         spec["max_steps"] = args.max_steps
     if args.episode_index >= 0:

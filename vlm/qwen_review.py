@@ -62,6 +62,13 @@ CHOICE_PROMPT = (
 )
 
 
+CHOICE_ID_POLICIES = ('global_v1', 'image_order_v1')
+IMAGE_ORDER_GUIDANCE = (
+    'Candidate IDs in this request are exactly the 1-based image positions: '
+    'the first image is candidate_id 1, the second is candidate_id 2, and so on. '
+    'Return only one of the listed IDs. No external object IDs are used.'
+)
+
 PROMPT_POLICIES = ('legacy', 'semantic_guard_v1')
 SEATING_REVIEW_GUIDANCE = (
     'Use conservative category boundaries for chair and couch. A standalone, plush '
@@ -113,12 +120,18 @@ TV_CHOICE_GUIDANCE = (
 )
 
 def build_prompt(target, *, target_confidence=False, multiview=False, count=1,
-                 candidate_ids=None, policy='legacy'):
+                 candidate_ids=None, policy='legacy', choice_id_policy='global_v1'):
     """Keep legacy bytes stable; semantic guidance changes only requested categories."""
     if policy not in PROMPT_POLICIES:
         raise ValueError('Unknown Qwen prompt policy')
+    if choice_id_policy not in CHOICE_ID_POLICIES:
+        raise ValueError('Unknown Qwen choice ID policy')
     if candidate_ids is not None:
-        prompt = CHOICE_PROMPT.format(target=target, ids=candidate_ids)
+        wire_ids = (list(range(1, len(candidate_ids) + 1))
+                    if choice_id_policy == 'image_order_v1' else list(candidate_ids))
+        prompt = CHOICE_PROMPT.format(target=target, ids=wire_ids)
+        if choice_id_policy == 'image_order_v1':
+            prompt += ' ' + IMAGE_ORDER_GUIDANCE
     else:
         template = MULTIVIEW_PROMPT if multiview else (CONFIDENCE_PROMPT if target_confidence else PROMPT)
         prompt = template.format(target=target, count=count)
@@ -290,9 +303,12 @@ class QwenTransportError(RuntimeError):
 
 class QwenReviewer:
     def __init__(self, ledger, model=MODEL, target_confidence=False,
-                 plant_confirm_threshold=None, prompt_policy='legacy'):
+                 plant_confirm_threshold=None, prompt_policy='legacy', choice_id_policy='global_v1'):
         if prompt_policy not in PROMPT_POLICIES:
             raise ValueError('Unknown Qwen prompt policy')
+        if choice_id_policy not in CHOICE_ID_POLICIES:
+            raise ValueError('Unknown Qwen choice ID policy')
+        self.choice_id_policy = choice_id_policy
         self.prompt_policy = prompt_policy
         if plant_confirm_threshold is not None:
             if (not target_confidence or type(plant_confirm_threshold) not in (int, float) or
@@ -361,7 +377,10 @@ class QwenReviewer:
             Image.fromarray(rgb).save(image, format='PNG')
             pngs.append(image.getvalue())
         prompt = build_prompt(target, target_confidence=self.target_confidence, multiview=multiview,
-                              count=len(images), candidate_ids=candidate_ids, policy=self.prompt_policy)
+                              count=len(images), candidate_ids=candidate_ids, policy=self.prompt_policy,
+                              choice_id_policy=self.choice_id_policy)
+        local_ids = candidate_ids is not None and self.choice_id_policy == 'image_order_v1'
+        wire_ids = list(range(1, len(images) + 1)) if local_ids else candidate_ids
         content = [{'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
                    base64.b64encode(png).decode()}} for png in pngs]
         content.append({'type': 'text', 'text': prompt})
@@ -389,6 +408,11 @@ class QwenReviewer:
                                 image_selection='candidate_best_comparison_v1' if candidate_ids is not None else 'candidate_top5_joint_v1')
             if candidate_ids is not None:
                 metadata['candidate_ids'] = candidate_ids
+                if local_ids:
+                    metadata.update(choice_id_policy=self.choice_id_policy,
+                                    api_candidate_ids=wire_ids,
+                                    candidate_id_map=[{'image_index': i, 'candidate_id': ident}
+                                                      for i, ident in enumerate(candidate_ids, 1)])
             self._update(call_id, metadata)
             response, data, stage = None, None, 'transport'
             validation_step = None
@@ -419,8 +443,14 @@ class QwenReviewer:
                 if cost > RESERVE_CNY:
                     raise ValueError('Cost exceeds reservation')
                 validation_step = 'candidate_choice' if candidate_ids is not None else 'category_answer'
-                answer = (parse_choice(data, candidate_ids) if candidate_ids is not None
+                answer = (parse_choice(data, wire_ids) if candidate_ids is not None
                           else parse_answer(data, self.target_confidence))
+                if local_ids:
+                    # Validate in the API's local domain, then map exactly once.
+                    # Preserve the original reply; never interpret its free text
+                    # or guess that an out-of-range ID meant another candidate.
+                    metadata['raw_answer'] = dict(answer)
+                    answer = {**answer, 'candidate_id': candidate_ids[answer['candidate_id'] - 1]}
                 decision = (answer['outcome'] if candidate_ids is not None else
                             answer['decision'] if answer['quality'] == 'adequate' else 'uncertain')
                 if candidate_ids is None and target == 'potted plant' and self.plant_confirm_threshold is not None:
