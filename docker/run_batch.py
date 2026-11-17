@@ -50,7 +50,7 @@ def evaluation_command(dataset, episodes, output, video, max_steps=None,
     if qwen_choice_id_policy != 'global_v1' and (method != 'selected_review' or
             review_backend != 'qwen' or review_profile != 'linked_choice'):
         raise ValueError('Qwen choice ID policy requires selected_review / linked_choice / Qwen')
-    if qwen_prompt_policy not in ("legacy", "semantic_guard_v1"):
+    if qwen_prompt_policy not in ("legacy", "semantic_guard_v1", "semantic_guard_v2"):
         raise ValueError("Unknown Qwen prompt policy")
     if qwen_prompt_policy != "legacy" and (review_backend != "qwen" or method != "selected_review"):
         raise ValueError("Qwen prompt policy requires selected_review with Qwen")
@@ -258,7 +258,7 @@ def main():
                         help='linked_early only: single-frame target detector score, default 0.65')
     parser.add_argument("--confirm-threshold", type=float, default=0.65)
     parser.add_argument('--review-backend', choices=['blip2', 'qwen'], default='blip2')
-    parser.add_argument('--qwen-prompt-policy', choices=['legacy', 'semantic_guard_v1'], default='legacy',
+    parser.add_argument('--qwen-prompt-policy', choices=['legacy', 'semantic_guard_v1', 'semantic_guard_v2'], default='legacy',
                         help='Explicit semantic ambiguity guidance; legacy prompts remain unchanged')
     parser.add_argument('--qwen-choice-id-policy', choices=['global_v1', 'image_order_v1'],
                         default='global_v1', help='Use local image positions for candidate comparison IDs')

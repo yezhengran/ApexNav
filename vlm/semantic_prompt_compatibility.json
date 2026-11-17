@@ -1,0 +1,494 @@
+[
+  {
+    "policy": "legacy",
+    "target": "bed",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "8b40b3c621c5739dd6c0eaaddea925c3d268e2e8109e97fb42a2834ee8ea5d5f"
+  },
+  {
+    "policy": "legacy",
+    "target": "bed",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "9b7ae780f2dfc1b0efcf699ca7460918aab08ad6c0a3870e208428e86ef26119"
+  },
+  {
+    "policy": "legacy",
+    "target": "bed",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "6a1865c75e9fd79e974d5f610f4b9080a289e80f3dd051ac6f0b3cfd9b0787fc"
+  },
+  {
+    "policy": "legacy",
+    "target": "bed",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "58268f6f57efe191bb16d62ac8305ba103f26996da3b9a7f221f954bc87426a4"
+  },
+  {
+    "policy": "legacy",
+    "target": "chair",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "4cdaa061b47165980cec43461525baa84f3c9c8fcbd680c8e8dc2598d77bc20c"
+  },
+  {
+    "policy": "legacy",
+    "target": "chair",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "e887357f8acb72c3f301bf912106190b2eed8b0409c7a43f77be86000ac55aed"
+  },
+  {
+    "policy": "legacy",
+    "target": "chair",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "2c92a04a7672e43e6a0d6d9bcfc670add28a700b891fdfc7d6fd0f94b0bce52b"
+  },
+  {
+    "policy": "legacy",
+    "target": "chair",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "181a5bf46ad5d3287bcb12acf6414d5553e36f3b1a5ac81babfda8e0d19aab2c"
+  },
+  {
+    "policy": "legacy",
+    "target": "couch",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "332ec79df344601396b9ad9334c3cd523572e21f9b3d2628023e5455cdf65bf6"
+  },
+  {
+    "policy": "legacy",
+    "target": "couch",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "5b2cb0d54e59a79cb7fc9c752dba884710da03f36267aeb82f8f4790c2aafc02"
+  },
+  {
+    "policy": "legacy",
+    "target": "couch",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "24f14eaf1ad965554fb87ca87849e9de6e61d93bd327113b03a5607c38cc524c"
+  },
+  {
+    "policy": "legacy",
+    "target": "couch",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "32df0f73fb7d216eb2e785756f49934997d25e56d0aebe13290c36ff7054be16"
+  },
+  {
+    "policy": "legacy",
+    "target": "potted plant",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "c0bda1302ba3553eb7ac5a028c347532c6b617219b339140853bf80f23faddda"
+  },
+  {
+    "policy": "legacy",
+    "target": "potted plant",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "be65b36e6bd221faa2ef5f48e01177ddcced253f4b9ddf1dbaad3f788540c18e"
+  },
+  {
+    "policy": "legacy",
+    "target": "potted plant",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "e050217eb136da98fd96aedbb8e960f36fa699f83737582efcfe0868c74aa6d9"
+  },
+  {
+    "policy": "legacy",
+    "target": "potted plant",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "3a0baefea18b9a38e59fe1c51fbd57c818a9b7ec7f864546042f8dd350a21d0e"
+  },
+  {
+    "policy": "legacy",
+    "target": "toilet",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "4748a0c7d1d7da595cbb41e5a5332949d3b8fbac022c8b75804b7cd8f6205aca"
+  },
+  {
+    "policy": "legacy",
+    "target": "toilet",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "0a5efb2a25c3d1d5643534d88ee20405e2f3b1423eb7efd92c6294fc60bac0e1"
+  },
+  {
+    "policy": "legacy",
+    "target": "toilet",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "015c783b23766849689c71a4bd476535ec8aa8324dc4394e10475168a65f5660"
+  },
+  {
+    "policy": "legacy",
+    "target": "toilet",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "405b0fbb84b5fd0282a32aa06dd7b5783df50d853a7aba52ff784f8d2897ef3e"
+  },
+  {
+    "policy": "legacy",
+    "target": "tv",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "024bbd6d88c6fdb776d70eb909235d4125618c72fd1e656f3d83163985d8a2fd"
+  },
+  {
+    "policy": "legacy",
+    "target": "tv",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "c9c2290284b9dc4185952f5d621f24810d5c2c295dda93ff4a22657cee4e27a8"
+  },
+  {
+    "policy": "legacy",
+    "target": "tv",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "258ed90d7ebcbf8a61bdee53687002e2a3d6eaf9f734e302976951d739cf1b46"
+  },
+  {
+    "policy": "legacy",
+    "target": "tv",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "4acbe0c4176402e6d675d2dceed0bab56779c512fe89e78d7e57ec403c53dee7"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "bed",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "8b40b3c621c5739dd6c0eaaddea925c3d268e2e8109e97fb42a2834ee8ea5d5f"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "bed",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "9b7ae780f2dfc1b0efcf699ca7460918aab08ad6c0a3870e208428e86ef26119"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "bed",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "6a1865c75e9fd79e974d5f610f4b9080a289e80f3dd051ac6f0b3cfd9b0787fc"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "bed",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "58268f6f57efe191bb16d62ac8305ba103f26996da3b9a7f221f954bc87426a4"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "chair",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "af80809d7d14dc3e746583a3f014a65ac3b8493ad1aad6bf27384a8aa1aa1e4f"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "chair",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "ed518b8892ad23cc1590e306933641bf9c4260048e280d48a021b4d6ce9de688"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "chair",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "dd09457ae423973afd4857403f792642ba3f64a5685c87ac9c03b5b1b2181213"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "chair",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "74d6c40b2d76e3a5e74d0b618b9b9db394f4cd0673bf5a08a7443630023d01c7"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "couch",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "c707d69ac42300f5986113f071324c270d22740ed68633638981404a17e24001"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "couch",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "2e1f09318f5f85efcc05ad3c039e3e0a736bdc1ded2dc512ff25cbf7540acfcb"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "couch",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "53126a64e8dde0e961bd6c316fb344178eca91fdd04585ba04401725d9a0468b"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "couch",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "9a300cb6298c58673844d9cfbd8a1096c29ed3e6760d74af2d2645e1a50700e2"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "potted plant",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "c0bda1302ba3553eb7ac5a028c347532c6b617219b339140853bf80f23faddda"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "potted plant",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "be65b36e6bd221faa2ef5f48e01177ddcced253f4b9ddf1dbaad3f788540c18e"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "potted plant",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "e050217eb136da98fd96aedbb8e960f36fa699f83737582efcfe0868c74aa6d9"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "potted plant",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "3a0baefea18b9a38e59fe1c51fbd57c818a9b7ec7f864546042f8dd350a21d0e"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "toilet",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "4748a0c7d1d7da595cbb41e5a5332949d3b8fbac022c8b75804b7cd8f6205aca"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "toilet",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "0a5efb2a25c3d1d5643534d88ee20405e2f3b1423eb7efd92c6294fc60bac0e1"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "toilet",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "015c783b23766849689c71a4bd476535ec8aa8324dc4394e10475168a65f5660"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "toilet",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "405b0fbb84b5fd0282a32aa06dd7b5783df50d853a7aba52ff784f8d2897ef3e"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "tv",
+    "kwargs": {
+      "target_confidence": true
+    },
+    "sha256": "ed1d68653a18cedd7c7947bc554e92a4545f55853d1cbf8cdc5104d3ebcfbac7"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "tv",
+    "kwargs": {
+      "target_confidence": true,
+      "multiview": true,
+      "count": 5
+    },
+    "sha256": "c0179433343e46e45cd324318c124ad10c75642035e9a7201bce34ce4d98b861"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "tv",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ]
+    },
+    "sha256": "207635640bb604c64345f2c8dfa5745459ff95306197f6cb3220a87269f1b5fc"
+  },
+  {
+    "policy": "semantic_guard_v1",
+    "target": "tv",
+    "kwargs": {
+      "candidate_ids": [
+        2,
+        8
+      ],
+      "choice_id_policy": "image_order_v1"
+    },
+    "sha256": "b43bbcb1a1fa8b414a742dc7ac95e4fdde35e25b2ec4433822f09451e371a77a"
+  }
+]

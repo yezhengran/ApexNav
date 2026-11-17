@@ -69,7 +69,7 @@ IMAGE_ORDER_GUIDANCE = (
     'Return only one of the listed IDs. No external object IDs are used.'
 )
 
-PROMPT_POLICIES = ('legacy', 'semantic_guard_v1')
+PROMPT_POLICIES = ('legacy', 'semantic_guard_v1', 'semantic_guard_v2')
 SEATING_REVIEW_GUIDANCE = (
     'Use conservative category boundaries for chair and couch. A standalone, plush '
     'upholstered single-person seat, armchair, recliner, or single-seat sofa is ambiguous '
@@ -119,6 +119,75 @@ TV_CHOICE_GUIDANCE = (
     'selection is not a TV confirmation.'
 )
 
+
+# Version 2 is an opt-in revision of v1 for bed/couch/tv only. Preserve v1 text.
+BED_REVIEW_GUIDANCE_V2 = (
+    'For this task, bed means a normal sleeping bed, including a single bed; it does '
+    'not mean a small armchair-like seat. A partial view may be confirmed when visible '
+    'mattress, bed frame, headboard, or bedding structure clearly identifies part of a '
+    'sleeping bed. The whole bed, all corners, and its full width need not be visible. '
+    'Do not interpret an armchair, recliner, padded chair, or compact seat as a miniature '
+    'bed or daybed just because it has cushions, a backrest, or a soft horizontal surface. '
+    'If it clearly shows such a seat rather than a bed, reject; if the crop cannot '
+    'distinguish a bed fragment from seating, return uncertain. Do not invent unseen '
+    'bed structure or infer real-world size from crop size alone. A clear bed fragment '
+    'can have adequate quality; category ambiguity can remain despite a sharp image. '
+    'Base target_confidence on the visible category evidence.'
+)
+BED_CHOICE_GUIDANCE_V2 = (
+    'Prefer identifiable sleeping-bed structure, even a partial bed, over an armchair, '
+    'recliner, padded chair, or compact seat. Do not prefer a fully visible armchair over '
+    'a clearly identifiable bed fragment merely because the latter is cropped. Normal '
+    'single beds are valid; armchair-like seats are not miniature beds or daybeds for '
+    'this task. Do not invent hidden bed structure or infer size solely from the crop. '
+    'If all candidates are ambiguous, still choose the best-supported candidate and '
+    'briefly state the ambiguity. Relative selection does not confirm its category.'
+)
+COUCH_REVIEW_GUIDANCE_V2 = (
+    'For couch, prioritize a large sofa with multiple seating positions. Confirm when '
+    'visible structure clearly supports a multi-seat sofa, for example a continuous '
+    'seat and back extending across multiple positions. A standalone upholstered '
+    'single-person seat, armchair, recliner, or single-seat sofa must remain uncertain '
+    'rather than confirmed: it may remain a navigation candidate. Do not confirm it '
+    'as couch merely because of upholstery, armrests, tufting, or cushions. A cropped '
+    'sofa can hide other seats: do not conclude it is single-seat from one visible '
+    'cushion, but do not invent unseen seats either. If multi-seat structure is unresolved, '
+    'return uncertain, even when quality is adequate. Reject clearly different objects '
+    'outside this single-seat ambiguity. Let target_confidence reflect the unresolved '
+    'category evidence; do not equate a sharp image with semantic certainty.'
+)
+COUCH_CHOICE_GUIDANCE_V2 = (
+    'Prefer a clearly identifiable large multi-seat sofa over a standalone upholstered '
+    'single-person seat, armchair, recliner, or single-seat sofa. Keep the latter as '
+    'lower-priority uncertain alternatives, not confirmed couches. A crop showing only '
+    'one cushion is not proof that the whole sofa is single-seat: use visible structural '
+    'evidence without inventing unseen width. Do not choose an obviously unrelated '
+    'object just to avoid an ambiguous seat. If all candidates are ambiguous, still '
+    'select the best-supported one and mention the ambiguity; selection is not confirmation.'
+)
+TV_REVIEW_GUIDANCE_V2 = (
+    'For this task, prioritize evidence of a physical TV with a dark or black blank '
+    'screen, but black-screen appearance is a preference, not an eligibility rule. '
+    'A clearly identifiable television displaying content may still be confirmed. '
+    'Distinguish actual display hardware from framed artwork, posters, mirrors, windows, '
+    'and other dark rectangles. Darkness, a rectangular outline, or wall mounting alone '
+    'does not establish TV. Use visible screen/panel structure, bezel, stand, controls, '
+    'connections, or other display-specific evidence; no single cue is mandatory. '
+    'Neither pictorial content nor a reflection by itself proves the object is artwork. '
+    'If physical TV versus artwork remains unresolved, return uncertain, with confidence '
+    'reflecting that ambiguity; reject only when a different object is clearly established. '
+    'Do not infer task success or dataset instance membership.'
+)
+TV_CHOICE_GUIDANCE_V2 = (
+    'Prefer identifiable physical TVs over artwork, posters, mirrors, windows, and '
+    'unexplained wall rectangles. Among candidates with comparable evidence of actual '
+    'display hardware, prefer a dark or black blank screen. This is not a hard filter: '
+    'a clearly identifiable TV showing content is valid and should outrank a dark '
+    'rectangle with weak TV evidence. Do not mistake displayed art for a physical '
+    'painting solely from image content. If all candidates are ambiguous, still select '
+    'the best-supported one and briefly state the ambiguity; selection is not confirmation.'
+)
+
 def build_prompt(target, *, target_confidence=False, multiview=False, count=1,
                  candidate_ids=None, policy='legacy', choice_id_policy='global_v1'):
     """Keep legacy bytes stable; semantic guidance changes only requested categories."""
@@ -140,6 +209,16 @@ def build_prompt(target, *, target_confidence=False, multiview=False, count=1,
             prompt += ' ' + (SEATING_CHOICE_GUIDANCE if candidate_ids is not None else SEATING_REVIEW_GUIDANCE)
         elif target == 'tv':
             prompt += ' ' + (TV_CHOICE_GUIDANCE if candidate_ids is not None else TV_REVIEW_GUIDANCE)
+    elif policy == 'semantic_guard_v2':
+        choice = candidate_ids is not None
+        if target == 'chair':
+            prompt += ' ' + (SEATING_CHOICE_GUIDANCE if choice else SEATING_REVIEW_GUIDANCE)
+        elif target == 'bed':
+            prompt += ' ' + (BED_CHOICE_GUIDANCE_V2 if choice else BED_REVIEW_GUIDANCE_V2)
+        elif target == 'couch':
+            prompt += ' ' + (COUCH_CHOICE_GUIDANCE_V2 if choice else COUCH_REVIEW_GUIDANCE_V2)
+        elif target == 'tv':
+            prompt += ' ' + (TV_CHOICE_GUIDANCE_V2 if choice else TV_REVIEW_GUIDANCE_V2)
     return prompt
 
 
