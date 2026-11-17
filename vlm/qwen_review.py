@@ -245,6 +245,40 @@ def transport_diagnostic(exc):
                          category in ('connect_timeout', 'response_timeout', 'connection_interrupted')}
 
 
+# Fixed validation labels avoid leaking arbitrary exception/request text. The
+# response body is saved only for response-stage failures, never HTTP headers.
+_RESPONSE_ERRORS = {
+    'Usage outside the reserved request bounds': 'usage_bounds',
+    'Cost exceeds reservation': 'reservation_exceeded',
+    'Incomplete candidate comparison': 'incomplete_comparison',
+    'Unexpected comparison schema': 'comparison_schema',
+    'Invalid comparison choice': 'comparison_choice',
+    'Incomplete Qwen answer': 'incomplete_answer',
+    'Unexpected Qwen answer schema': 'answer_schema',
+    'Invalid Qwen target confidence': 'target_confidence',
+    'Invalid Qwen decision': 'decision',
+    'Invalid Qwen evidence quality': 'evidence_quality',
+    'Invalid Qwen explanation': 'explanation',
+}
+
+
+def response_failure_evidence(response, data, exc, validation_step, key):
+    """Keep bounded, redacted provider evidence without weakening validation."""
+    code = ('invalid_json' if isinstance(exc, json.JSONDecodeError) else
+            _RESPONSE_ERRORS.get(str(exc), 'invalid_response'))
+    evidence = {'response_validation_step': validation_step,
+                'response_validation_code': code}
+    raw = getattr(response, 'text', None)
+    if not isinstance(raw, str) and data is not None:
+        raw = json.dumps(data, ensure_ascii=False)
+    if isinstance(raw, str):
+        raw = raw.replace(key, '[REDACTED]')
+        evidence.update(response_body=raw[:65536],
+                        response_body_truncated=len(raw) > 65536,
+                        response_body_sha256=hashlib.sha256(raw.encode()).hexdigest())
+    return evidence
+
+
 class QwenTransportError(RuntimeError):
     """A failed HTTP request, with safe linkage for episode-level recovery."""
     def __init__(self, call_id, diagnostic, error_type):
@@ -356,12 +390,14 @@ class QwenReviewer:
             if candidate_ids is not None:
                 metadata['candidate_ids'] = candidate_ids
             self._update(call_id, metadata)
-            response, stage = None, 'transport'
+            response, data, stage = None, None, 'transport'
+            validation_step = None
             try:
                 response = requests.post(BASE_URL + '/chat/completions', json=payload,
                                          headers={'Authorization': 'Bearer ' + self.key},
                                          timeout=(10, 60), allow_redirects=False, verify=True)
                 stage = 'response'
+                validation_step = 'http_status'
                 metadata['http_status'] = response.status_code
                 if response.status_code != 200:
                     try:
@@ -370,15 +406,19 @@ class QwenReviewer:
                     except (ValueError, AttributeError):
                         pass
                     raise RuntimeError(f'Qwen HTTP {response.status_code}')
+                validation_step = 'json_body'
                 data = response.json()
+                validation_step = 'usage'
                 usage = data['usage']
                 inp, out = usage['prompt_tokens'], usage['completion_tokens']
                 if (type(inp) is not int or type(out) is not int or
                         not 0 < inp <= 16384 or not 0 <= out <= MAX_TOKENS):
                     raise ValueError('Usage outside the reserved request bounds')
+                validation_step = 'cost'
                 cost = (inp + 10 * out) / 1e6
                 if cost > RESERVE_CNY:
                     raise ValueError('Cost exceeds reservation')
+                validation_step = 'candidate_choice' if candidate_ids is not None else 'category_answer'
                 answer = (parse_choice(data, candidate_ids) if candidate_ids is not None
                           else parse_answer(data, self.target_confidence))
                 decision = (answer['outcome'] if candidate_ids is not None else
@@ -402,6 +442,9 @@ class QwenReviewer:
                 self._update(call_id, metadata)
                 return {'decision': decision, 'call_id': call_id, **metadata}
             except Exception as exc:
+                if stage == 'response':
+                    metadata.update(response_failure_evidence(
+                        response, data, exc, validation_step, self.key))
                 diagnostic = transport_diagnostic(exc)
                 retry = stage == 'transport' and diagnostic['retryable'] and attempt < len(RETRY_DELAYS)
                 delay = RETRY_DELAYS[attempt] if retry else None
@@ -419,7 +462,7 @@ class QwenReviewer:
                 if stage == 'transport':
                     raise QwenTransportError(call_id, diagnostic, type(exc).__name__) from None
                 raise RuntimeError(f'Qwen verification failed ({type(exc).__name__}, '
-                                   f'{diagnostic["category"]}); '
+                                   f'{metadata["response_validation_code"]}, call_id={call_id}); '
                                    'no BLIP or silent navigation fallback') from None
             finally:
                 if response is not None:
