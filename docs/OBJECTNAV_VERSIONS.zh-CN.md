@@ -1,6 +1,8 @@
 # ObjectNav 实验版本与数据名称
 
 <!-- Q8_VERSIONS_START -->
+
+**2026-11-17：Q8-C2-semantic-v1编号修复续跑段646–1000。** 用户已授权继续；显式image_order_v1，实现cc5ce52／205源debec51956fe，前645仍原global_v1／203源f5fa79fc。最终1000必须分段展示源码和协议，原成绩不覆盖。唯一控制continue-0646-localids-20261117，启动状态以实际进程为准。见[续跑协议](experiments/2026-11-17-qwen-localids-continuation.zh-CN.md)。
 **2026-11-17：Q8候选ID协议修复（image_order_v1，尚无新导航成绩）。** 同图诊断复现图片序号5与真实ID7混淆；新增显式局部ID到真实候选ID的映射，保留global_v1与单物体复检。201回归及CLI/Hydra通过；仅一次旧协议API诊断，新协议在线／导航尚未验证，前645不变。见[修复报告](experiments/2026-11-17-qwen-response-diagnostic.zh-CN.md)。
 
 **2026-11-17：Q8响应诊断补丁（无新评测成绩）。** 仅增加Qwen响应错误的固定校验阶段／错误码／脱敏正文与哈希，108离线回归通过；请求和决策规则不变。646真实错误仍待明确授权的单次API重放，当前645结果保留、评测停止，旧冻结入口不可重启。见[诊断记录](experiments/2026-11-17-qwen-response-diagnostic.zh-CN.md)。
