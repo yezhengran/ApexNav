@@ -1,14 +1,11 @@
-"""Early-review behavior with real crops/mapper receipts and a fake VLM."""
+"""Offline regression tests; external inference is mocked."""
 import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-
 import numpy as np
-
 from vlm.early_review import EarlyTargetReviewer
-
 
 class EarlyReviewTest(unittest.TestCase):
     def setUp(self):
@@ -127,7 +124,3 @@ class EarlyReviewTest(unittest.TestCase):
         self.assertEqual(len(self.view.frames),48)
         self.assertNotIn(1,self.view.frames)
         self.assertEqual(source.read_bytes(),original)
-
-
-if __name__ == '__main__':
-    unittest.main()

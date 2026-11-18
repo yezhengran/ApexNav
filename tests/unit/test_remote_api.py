@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""Protocol tests using a local mock HTTP server; no model or GPU is loaded."""
-
+"""Offline regression tests; external inference is mocked."""
 import base64
 import json
 import os
@@ -10,10 +8,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import Mock, patch
-
 import numpy as np
 import requests
-
 from vlm.detector.grounding_dino import GroundingDINOClient
 from vlm.detector.yolov7 import YOLOv7Client
 from vlm.itm.blip2itm import BLIP2ITMClient
@@ -22,7 +18,6 @@ from vlm.Labels import detector_category
 from vlm.server_wrapper import (
     host_model, model_url, release_idle_cuda_cache, send_request, str_to_image,
 )
-
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
@@ -54,7 +49,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-
 
 class RemoteAPITest(unittest.TestCase):
     @classmethod
@@ -145,7 +139,3 @@ class RemoteAPITest(unittest.TestCase):
                 fake_torch.cuda.is_initialized.return_value = False
                 release_idle_cuda_cache()
                 fake_torch.cuda.empty_cache.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

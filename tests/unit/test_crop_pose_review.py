@@ -1,14 +1,12 @@
-"""Offline fallback state machine and measured geometry; no live API."""
+"""Offline regression tests; external inference is mocked."""
 import json
 import math
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
-
 import numpy as np
 from vlm.crop_pose_review import CropPoseTargetReviewer, crop_pose_band
-from vlm import test_annular_review as fixture_module
-
+from tests.unit import test_annular_review as fixture_module
 
 class CropPoseTests(unittest.TestCase):
     def setUp(self):
@@ -104,5 +102,3 @@ class CropPoseTests(unittest.TestCase):
         self.assertFalse(crop_pose_band([0,0],[5,0,0])['feasible'])
         self.assertAlmostEqual(crop_pose_band([1,2],[4,6,0])['radius'],5)
         with self.assertRaises(ValueError):crop_pose_band([0,0],[math.nan,0,0])
-
-if __name__=='__main__':unittest.main()

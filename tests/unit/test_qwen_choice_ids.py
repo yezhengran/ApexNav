@@ -1,4 +1,4 @@
-"""Local API candidate IDs must map to exact mapper identities, without guessing."""
+"""Offline regression tests; external inference is mocked."""
 import copy
 import hashlib
 import json
@@ -7,14 +7,13 @@ import subprocess
 import sys
 import unittest
 from unittest.mock import Mock, patch
-
 import numpy as np
 from PIL import Image
 from vlm import qwen_review as Q
-from vlm import test_qwen_review as fixtures
-from vlm import test_choice_review as choice_fixtures
+from tests.unit import test_qwen_review as fixtures
+from tests.unit import test_choice_review as choice_fixtures
 from docker import audit_annular as audit
-from docker import test_audit_choice as audit_fixtures
+from tests.unit import test_audit as audit_fixtures
 from docker.run_batch import evaluation_command
 
 POLICY = 'image_order_v1'
@@ -149,7 +148,7 @@ class ChoiceIdTests(unittest.TestCase):
 
     def test_full_evidence_audit_requires_matching_config_and_experiment_spec(self):
         f=audit_fixtures.ChoiceAuditTest();self.addCleanup(f.doCleanups)
-        with patch('docker.test_audit_choice.QwenReviewer',side_effect=lambda *a,**kw:Q.QwenReviewer(*a,**kw,choice_id_policy=POLICY)):f.setUp()
+        with patch('tests.unit.test_audit.QwenReviewer',side_effect=lambda *a,**kw:Q.QwenReviewer(*a,**kw,choice_id_policy=POLICY)):f.setUp()
         f.cfg['active_view']['qwen_choice_id_policy']=POLICY
         spec=f.run/'experiment.json';spec.write_text(json.dumps({'review':{'choice_id_policy':POLICY}}))
         self.assertEqual(len(f.audit()['comparisons']),1)
@@ -172,5 +171,3 @@ class ChoiceIdTests(unittest.TestCase):
         with patch.object(Q,'read_credentials') as read:
             with self.assertRaises(ValueError):Q.QwenReviewer('/missing',choice_id_policy='typo')
             read.assert_not_called()
-
-if __name__=='__main__':unittest.main()

@@ -1,7 +1,4 @@
-"""Run in the built ROS/venv: exercises the real mapper/FSM, no model or API.
-
-Use a separate ROS_DOMAIN_ID for this test. The launch child is always stopped.
-"""
+"""ROS/Habitat integration checks; no navigation or model loading."""
 import copy
 import os
 from pathlib import Path
@@ -10,7 +7,6 @@ import subprocess
 import tempfile
 import time
 import unittest
-
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
@@ -18,7 +14,6 @@ from geometry_msgs.msg import PoseStamped
 from plan_env.msg import NavigationObservation
 from plan_env.srv import ApplyObservation
 from std_msgs.msg import Int32
-
 
 class ObservationBarrierTest(unittest.TestCase):
     def test_real_mapper_receipt_order_and_legacy_isolation(self):
@@ -98,7 +93,3 @@ class ObservationBarrierTest(unittest.TestCase):
             text = (Path(directory)/'planner.log').read_text()
             self.assertEqual(text.count('[Observation applied]'), 2)
             self.assertIn('step=1 position=(0.250000,0.000000)', text)
-
-
-if __name__ == '__main__':
-    unittest.main()

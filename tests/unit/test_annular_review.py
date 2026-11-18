@@ -1,4 +1,4 @@
-"""Offline top-five identity, joint-request and bounded-inspection regressions."""
+"""Offline regression tests; external inference is mocked."""
 import hashlib
 import json
 import math
@@ -7,15 +7,12 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-
 import numpy as np
-
 from vlm.annular_review import AnnularTargetReviewer, effective_decision
 from vlm.qwen_review import QwenReviewer
 from vlm.active_view import crop_target
 from PIL import Image
-from vlm.test_qwen_review import response, ssl_eof
-
+from tests.unit.test_qwen_review import response, ssl_eof
 
 class Backend:
     def __init__(self):
@@ -27,7 +24,6 @@ class Backend:
         self.images.append(image.copy()); return self.reply()
     def review_images(self, images, target):
         self.joint.append([image.copy() for image in images]); return self.reply()
-
 
 class AnnularTests(unittest.TestCase):
     def setUp(self):
@@ -170,7 +166,6 @@ class AnnularTests(unittest.TestCase):
         self.assertEqual(hashes,event['model_reply']['image_sha256s'])
         self.assertEqual(hashes,calls[-1]['image_sha256s'])
 
-
 class MultiImageRequestTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -206,5 +201,3 @@ class MultiImageRequestTests(unittest.TestCase):
         self.assertEqual(len(calls),2);self.assertEqual(calls[0]['charged_cny'],.02)
         self.assertEqual(calls[0]['image_sha256s'],calls[1]['image_sha256s'])
         self.assertEqual(post.call_args_list[0],post.call_args_list[1]);self.assertEqual(result['image_count'],1)
-
-if __name__=='__main__':unittest.main()

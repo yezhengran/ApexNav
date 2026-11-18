@@ -1,16 +1,13 @@
-"""Geometry, provenance and live reviewer gates without a model request."""
+"""Offline regression tests; external inference is mocked."""
 import json
 import math
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-
 import numpy as np
-
 from vlm.framing_review import FramingTargetReviewer, framing_distance, object_envelope
 from docker.run_batch import evaluation_command
-
 
 class GeometryTests(unittest.TestCase):
     def envelope(self, low=.7, high=1.1, clipped=False):
@@ -88,7 +85,6 @@ class GeometryTests(unittest.TestCase):
             self.assertEqual('+active_view.framing_review=true' in cmd,profile=='linked_framing')
             self.assertEqual('+active_view.confidence_review=true' in cmd,profile!='linked_fused')
 
-
 class ReviewerTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.calls=[]
@@ -125,6 +121,3 @@ class ReviewerTests(unittest.TestCase):
     def test_too_close_arrival_never_calls_second(self):
         self.frame(2,x=1.8);self.v.finish_inspection(True)
         self.assertEqual(len(self.calls),1);self.assertIsNone(self.v.active)
-
-
-if __name__=='__main__':unittest.main()

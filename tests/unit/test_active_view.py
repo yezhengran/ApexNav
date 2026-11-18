@@ -1,15 +1,11 @@
-"""Small observation-chain regressions; real projection/crops, no simulator GT."""
-
+"""Offline regression tests; external inference is mocked."""
 import json
 import tempfile
 from types import SimpleNamespace
 import unittest
-
 import numpy as np
-
 from vlm.active_view import SelectedTargetReviewer
 from vlm.linked_review import LinkedTargetReviewer
-
 
 class ReviewerTest(unittest.TestCase):
     def setUp(self):
@@ -266,7 +262,3 @@ class ReviewerTest(unittest.TestCase):
         self.assertIsNone(view.begin(target+[1.]))
         self.assertEqual(view.stats['vlm_calls'],0)
         self.assertEqual(view.finish_inspection(False),(1,view.PENDING_EVIDENCE))
-
-
-if __name__ == '__main__':
-    unittest.main(verbosity=2)

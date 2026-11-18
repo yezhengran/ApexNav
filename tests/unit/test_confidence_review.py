@@ -1,11 +1,11 @@
-"""Offline invariants for the optional facing/score profile."""
+"""Offline regression tests; external inference is mocked."""
 import json, math, tempfile, unittest
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 from vlm.confidence_review import ConfidenceTargetReviewer
 from vlm.qwen_review import parse_answer
-from vlm.test_qwen_review import response
+from tests.unit.test_qwen_review import response
 
 class ConfidenceTests(unittest.TestCase):
  def setUp(self):
@@ -61,5 +61,3 @@ class ConfidenceTests(unittest.TestCase):
   answer['target_confidence']=.5;data['choices'][0]['message']['content']=json.dumps(answer)
   self.assertEqual(parse_answer(data,True)['target_confidence'],.5)
   with self.assertRaises(ValueError):parse_answer(data)
-
-if __name__=='__main__':unittest.main()

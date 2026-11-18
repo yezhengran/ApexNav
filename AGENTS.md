@@ -1,27 +1,30 @@
 # ApexNav 实验协作规则
 
-开始工作前阅读 [新窗口交接](docs/OBJECTNAV_HANDOFF.zh-CN.md) 和 [实验指令](docker/experiment_commands.zh-CN.md)。
+开始工作前阅读 [设计与模块维护](docs/OBJECTNAV_DESIGN.zh-CN.md)、[最终实验总结](docs/EXPERIMENT_SUMMARY.zh-CN.md)，再按需查 [历史交接](docs/OBJECTNAV_HANDOFF.zh-CN.md) 和 [实验指令](docker/experiment_commands.zh-CN.md)。历史运行、暂停和恢复段落不是新启动授权；始终核对真实进程与最新用户要求。
 
 ## 用户目标与范围
 
 - 先在 Habitat/HM3Dv2 上实现用户自己的 ObjectNav 方法，完成基线对照和消融；再迁移到 Tracer Mini 实机。
-- 保留 ROS2 Jazzy、现有 Docker 环境和可复现基线；具体算法创新点尚未选定。
+- 保留 ROS2 Jazzy、现有 Docker 环境和可复现基线；当前最终开发基准为 Q8-C2-semantic-v2，创新点与实现边界以设计文档为准。
 - 本地视觉模型优先，显存不足时可使用已有 HTTP 接口外置部分模型；更换模型属于独立实验变量。
 - 回复、实验记录与交接文档以简洁中文为主。
 
 ## 分支与提交
 
-- 工作分支：`codex/objectnav-sim-to-tracer-mini`。
+- 工作分支：`codex/objectnav-annular-top5`。
 - 推送目标仅为 `origin`：`git@github.com:yezhengran/ApexNav.git`；`upstream` 仅作参考。
 - 用户已授权：每个完成且通过适当验证的逻辑改动，应主动 commit 并 push 到上述分支，无需每次重复询问。纯解释/诊断请求不因此变成修改请求。
 - 动手前核对分支、远程、工作区与暂存区；保留并区分用户未提交的工作。只按明确文件路径暂存本次修改，不盲目 `git add .`。
 - 提交前审阅 diff、做相关验证，检查凭据与大文件；不要上传数据集、权重、视频、日志、`config/vlm.env` 或本机密码/令牌。
 - 不向 `main`、`ros2-jazzy`、`dev/tracer-mini` 或 `upstream` 推送；不 force push、不重写已发布提交、不自行合并分支。
-- 正常推送命令：`git push origin HEAD:refs/heads/codex/objectnav-sim-to-tracer-mini`。先确认当前 HEAD 就在目标工作分支。
+- 正常推送命令：`git push origin HEAD:refs/heads/codex/objectnav-annular-top5`。先确认当前 HEAD 就在目标工作分支。
 - 推送完成后核对远程 SHA；最后报告 commit、测试和推送结果。推送失败须明确说明，保留本地提交，不声称已同步。
 
 ## 实验与运行
 
+- 最终版三类487已完成并验收；混合1000为772成功（77.20%），并非全1000新跑v2。所有旧控制入口保持归档，不因修改文档或测试重启评测。
+- 测试统一放在 `tests/`，命令见 [测试说明](tests/README.md)。旧复查父类仍参与最终版，不按文件名或历史版本号盲目删除。
+- 项目结构整理后的HEAD/源码摘要与历史运行来源不同；保留旧provenance、源码快照、账本和原始结果，新实验独立冻结来源。
 - 基线提交为 `3828f38`；算法变更采用可配置开关，保留基线行为，并使用独立输出目录。
 - 同时只跑一份评测。启动前检查现有进程、GPU、主机 RAM；新窗口先完成交接核验，不自动开启长时间评测。
 - 代码或配置修改会通过 bind mount 立即影响容器；不得在一组对照实验中途修改其运行代码。C++ 改动需要重新构建。

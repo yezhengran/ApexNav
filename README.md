@@ -29,9 +29,14 @@
 
 ## About This Repository
 
-For the personal ObjectNav simulation-to-Tracer-Mini work, start with
-[`AGENTS.md`](AGENTS.md) and the [agent handoff](docs/OBJECTNAV_HANDOFF.zh-CN.md).
-The experiment branch is `codex/objectnav-sim-to-tracer-mini`.
+本分支的最终开发基准为 **Q8-C2-semantic-v2**（2026-11-18）。床/沙发/电视新487例为385成功；全部替换原三类并保留其他513例后，混合1000成功率为 **77.20%（772/1000）**。混合结果不是全1000新跑v2，详见来源和比较边界。
+
+- [实验总结与最终成绩](docs/EXPERIMENT_SUMMARY.zh-CN.md)
+- [创新点、整体架构、执行流程与模块增减指南](docs/OBJECTNAV_DESIGN.zh-CN.md)
+- [统一测试入口](tests/README.md)
+- [协作规则](AGENTS.md)；[历史交接](docs/OBJECTNAV_HANDOFF.zh-CN.md)与[版本档案](docs/OBJECTNAV_VERSIONS.zh-CN.md)
+
+当前工作分支为 `codex/objectnav-annular-top5`。正式实验已完成并退出；旧控制目录和启动脚本只作历史证据，不直接恢复。下方保留原项目介绍、安装说明与署名。
 
 This is the **ROS2 Jazzy** port of [ApexNav](https://github.com/Robotics-STAR-Lab/ApexNav), originally built on ROS1 Noetic. The entire codebase has been migrated to work with **Ubuntu 24.04 + ROS2 Jazzy**.
 

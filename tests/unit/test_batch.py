@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""Batch accounting/video tests; never start Habitat navigation or a planner."""
-
+"""Offline regression tests; external inference is mocked."""
 import json
 from pathlib import Path
 import subprocess
@@ -9,9 +7,6 @@ import tempfile
 import tarfile
 import unittest
 from unittest.mock import patch
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 from basic_utils.record_episode.experiment import (
     EpisodeVideo, episode_plan, read_rows, resume_state, save_result,
     record_episode_identity,
@@ -20,6 +15,9 @@ from run_batch import (evaluation_command, stop_owned, resume_migration, source_
                        resume_contract, validate_resume_spec, validate_resume_config)
 from compare_runs import compare
 
+ROOT = Path(__file__).resolve().parents[2]
+
+sys.path.insert(0, str(ROOT))
 
 class BatchTest(unittest.TestCase):
     def row(self, number):
@@ -418,7 +416,3 @@ class BatchTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 record_episode_identity(root, 2, 'a', '1', 'bed')
             record_episode_identity(root, 2, 'b', '1', 'bed')
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

@@ -1,20 +1,17 @@
-"""Offline Q8-C evidence/choice/transport boundaries; no paid API calls."""
+"""Offline regression tests; external inference is mocked."""
 import copy
 import hashlib
 import json
 import math
 from pathlib import Path
 from unittest.mock import Mock, patch
-
 import numpy as np
 from PIL import Image
-
 from vlm.choice_review import ChoiceTargetReviewer
 from vlm.qwen_review import QwenReviewer, parse_choice, QwenTransportError
-from vlm.test_annular_review import AnnularTests, MultiImageRequestTests
-from vlm.test_qwen_review import response, ssl_eof
+from tests.unit.test_annular_review import AnnularTests, MultiImageRequestTests
+from tests.unit.test_qwen_review import response, ssl_eof
 from vlm.active_view import crop_target
-
 
 class ChoiceTests(AnnularTests):
     def setUp(self):
@@ -75,7 +72,6 @@ class ChoiceTests(AnnularTests):
         groups=[c.args[2] for c in self.backend.compare_candidates.call_args_list]
         self.assertEqual(groups,[[1,2,3,4,5],[6,7,8,9,10],[11,12],[5,10,12]])
         self.assertEqual(self.v.comparison_count,4)
-
 
 class ChoiceTransportTests(MultiImageRequestTests):
     def choice_answer(self, ident=4):

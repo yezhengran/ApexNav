@@ -1,4 +1,4 @@
-"""Fault-injection accounting tests; no provider requests or navigation results."""
+"""Offline regression tests; external inference is mocked."""
 import hashlib
 import io
 import json
@@ -8,11 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import types
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from basic_utils.record_episode.experiment import save_result, read_rows, record_episode_identity
 from network_recovery import eligible_failure, recover_episode
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 class RecoveryTest(unittest.TestCase):
     def setUp(self):
@@ -203,7 +202,3 @@ class RecoveryTest(unittest.TestCase):
         self.assertIn(f'test_epi_num={single_index if single_index is not None else -1}', launches[1])
         self.assertTrue((output/f'network-recovery/episode-{number:04d}/retry-01/episode-{number:04d}.partial.mp4').exists())
         self.assertEqual(json.loads((output/'status.json').read_text()), {'state':'completed','exit_code':0})
-
-
-if __name__ == '__main__':
-    unittest.main()

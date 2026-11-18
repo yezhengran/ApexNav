@@ -1,4 +1,4 @@
-"""Real mapper-bound images and active inspection, with no network/model calls."""
+"""Offline regression tests; external inference is mocked."""
 import json,tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,5 +84,3 @@ class FusedReviewTests(unittest.TestCase):
   for step in range(2,26):result=self.frame(step)
   self.assertEqual(result,(1,self.v.UNCERTAIN));self.assertEqual(len(self.images),1)
   self.assertEqual(self.v.inspection_readiness(),[])
-
-if __name__=='__main__':unittest.main()

@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-"""Regression for Lab camera pitch with both Habitat-Sim sensor suite APIs."""
-
+"""ROS/Habitat integration checks; no navigation or model loading."""
 from types import SimpleNamespace
 import unittest
-
 import magnum as mn
 import numpy as np
 from habitat.tasks.nav.nav import NavigationMovementAgentAction
-
 
 class CameraTiltTest(unittest.TestCase):
     def check_suite(self, name):
@@ -29,7 +25,3 @@ class CameraTiltTest(unittest.TestCase):
 
     def test_public_suite(self):
         self.check_suite("sensors")
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

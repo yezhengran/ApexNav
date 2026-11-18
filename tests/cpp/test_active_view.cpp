@@ -1,9 +1,63 @@
 #include "exploration_manager/active_view.h"
 #include <cassert>
+#include <limits>
 #include <iostream>
+
 using apexnav_planner::ActiveView;
 using Eigen::Vector2d;
-int main() {
+void test_active_view() {
+  auto yes=[](const Vector2d&) { return true; };
+  auto route=[](const Vector2d& p, std::vector<Vector2d>& path) { path={p}; return true; };
+  std::vector<Vector2d> path;
+  ActiveView legacy;
+  assert(legacy.set({1,0,0,1,1}));
+  assert(!legacy.framing && legacy.framed({.1,0}));
+  assert(legacy.plan({4,0},yes,yes,route,path));
+  assert(std::abs(legacy.goal.norm()-1)<1e-8);
+  ActiveView turn;assert(turn.set({1,0,0,1,1,1}) && turn.turn_first);
+  ActiveView next;assert(next.set({2,0,0,2,.8,1.6875,2.7}));
+  assert(!next.framed({1.68,0}) && next.framed({1.69,0}));
+  auto outer=[](const Vector2d& p) { return p.norm()>2.30 && p.norm()<2.40; };
+  assert(next.plan({4,0},outer,yes,route,path));
+  assert(std::abs(next.goal.norm()-2.35)<1e-8); // Alternate farther ring.
+  assert(next.plan({4,0},outer,yes,route,path)); // Frozen safe point.
+  ActiveView bad;
+  assert(!bad.set({1,0,0,4.6,1,3,4.7}));
+  assert(!bad.set({1,0,0,2,1,2.1,2.7}));
+  assert(!bad.set({1,0,0,2,1,1.5,std::numeric_limits<double>::quiet_NaN()}));
+  assert(!bad.set({1,0,0,4,1})); // Legacy bound unchanged.
+  assert(bad.set({1,0,0,2,1,1.5,2.7}));
+  assert(!bad.plan({4,0},[](const Vector2d&) { return false; },yes,route,path));
+  assert(!ActiveView::safePath({{0,0},{1,0}},[](const Vector2d& p) { return p.x()<.4 || p.x()>.6; }));
+}
+
+void test_annular_view() {
+  auto clear=[](const Vector2d&){return true;};
+  auto safe=[](const Vector2d& p){return p.norm()>1.2;};
+  Vector2d position(4.,0.);
+  auto route=[&](const Vector2d& p,std::vector<Vector2d>& path){path={position,p};return true;};
+  ActiveView view;assert(view.set({1,0,0,2.,.8,1.65,2.7,1.}));
+  assert(view.annular && !view.framed({2.8,0}));
+  std::vector<Vector2d> path;
+  assert(view.plan(position,safe,clear,route,path));
+  assert(view.samples.size()>=2 && view.samples.size()<=3);
+  for(const auto& p:view.samples)assert(safe(p) && view.framed(p));
+  while(true) {
+    position=view.goal;
+    if(!view.advanceSample())break;
+    assert(view.plan(position,safe,clear,route,path));
+    assert(ActiveView::safePath(path,[&](const Vector2d& p){return safe(p)&&view.framed(p);}));
+  }
+  ActiveView none;assert(none.set({2,0,0,2,.8,1.65,2.7,1}));
+  assert(!none.plan(position,[](const Vector2d&){return false;},clear,route,path));
+  ActiveView slit;assert(slit.set({3,0,0,2,.8,1.65,2.7,1}));
+  // A solitary endpoint is not a traversable observation arc.
+  assert(!slit.plan(position,[](const Vector2d& p){return p.x()>1.65&&std::abs(p.y())<.01;},clear,route,path));
+  assert(!slit.set({4,0,0,2,.8,1.65,2.7,2}));
+  assert(view.set({}));assert(!view.annular && view.samples.empty());
+}
+
+void test_crop_pose_view() {
   Vector2d position(1.8,0.);
   auto clear=[](const Vector2d&){return true;};
   auto room=[](const Vector2d& p){return p.x()>1.1 && p.x()<2.2 && std::abs(p.y())<1.1;};
@@ -48,3 +102,5 @@ int main() {
   assert(invalid.set({}));assert(!invalid.crop_pose && !invalid.single_view);
   std::cout<<"crop-pose arc, source radius, sector and safety checks passed\n";
 }
+
+int main() { test_active_view(); test_annular_view(); test_crop_pose_view(); }

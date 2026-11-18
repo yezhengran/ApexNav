@@ -1,4 +1,4 @@
-"""Plant-only acceptance, provenance and real reviewer flow; no provider calls."""
+"""Offline regression tests; external inference is mocked."""
 import itertools
 import json
 import math
@@ -7,14 +7,11 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
-
 import numpy as np
-
 from docker.run_batch import evaluation_command
 from vlm.framing_review import FramingTargetReviewer
 from vlm.qwen_review import QwenReviewer
-from vlm.test_qwen_review import response
-
+from tests.unit.test_qwen_review import response
 
 class PlantConfidenceTests(unittest.TestCase):
     def setUp(self):
@@ -152,7 +149,3 @@ class PlantConfidenceTests(unittest.TestCase):
                     view.begin(target[:-1] + [4.])
                     self.assertIsNotNone(view.active)
                     self.assertEqual(view.stats['inspections'], 1)
-
-
-if __name__ == '__main__':
-    unittest.main()
