@@ -24,7 +24,6 @@
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <exploration_manager/active_view.h>
-#include <exploration_manager/frontier_view.h>
 #include <plan_env/msg/review_evidence.hpp>
 #include <plan_env/msg/scored_review_result.hpp>
 #include <plan_env/msg/candidate_comparison.hpp>
@@ -109,8 +108,6 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr inspection_sub_;
   rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr inspection_ack_pub_;
   ActiveView active_view_;
-  FrontierView frontier_view_;
-  bool frontier_look_ = false;
   bool step_sync_ = false;
   ObservationSequence observation_sequence_;
   rclcpp::Service<plan_env::srv::ApplyObservation>::SharedPtr observation_service_;
@@ -161,7 +158,6 @@ private:
   /* Action Planner */
   int callActionPlanner();
   int planInspection();
-  bool maybeLookAtFrontier(const Vector2d& position, double yaw);
   bool maybeReviewSelected(int exploration_result);
   bool maybeReviewAutomatic();
   bool maybeReviewStop();

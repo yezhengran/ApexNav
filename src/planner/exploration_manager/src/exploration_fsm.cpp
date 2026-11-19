@@ -16,10 +16,8 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   fp_.reset(new FSMParam);
   fd_.reset(new FSMData);
   active_view_ = ActiveView();
-  frontier_view_ = FrontierView();
   if (first_init) {
     node_->declare_parameter("navigation.step_sync", false);
-    node_->declare_parameter("navigation.frontier_look", false);
     node_->declare_parameter("review.enabled", false);
     node_->declare_parameter("review.late_step", 350);
     node_->declare_parameter("review.lineage", false);
@@ -34,7 +32,6 @@ void ExplorationFSM::init(rclcpp::Node::SharedPtr node)
   }
   node_->get_parameter("review.enabled", review_enabled_);
   node_->get_parameter("navigation.step_sync", step_sync_);
-  node_->get_parameter("navigation.frontier_look", frontier_look_);
   observation_sequence_.reset();
   node_->get_parameter("review.late_step", review_late_step_);
   node_->get_parameter("review.lineage", review_lineage_);
@@ -367,7 +364,6 @@ void ExplorationFSM::FSMCallback()
       // Review qualified cached frames even during the initial scan. This does
       // not consume a motion, increment the scan counter, or change arrival.
       if (maybeReviewAutomatic()) {
-        frontier_view_.cancel();
         transitState(ROS_STATE::PUB_ACTION, "automatic_review");
         break;
       }
@@ -449,11 +445,11 @@ int ExplorationFSM::callActionPlanner()
 
   // Inspection is a bounded detour, never a REACH_OBJECT/STOP condition.
   // With no request the original planner takes exactly the baseline path.
-  if (active_view_.id) { frontier_view_.cancel(); return planInspection(); }
+  if (active_view_.id) return planInspection();
 
   // Compare before arrival testing so a newly selected object cannot inherit
   // the old goal's STOP. No extra Habitat motion is consumed by the handshake.
-  if (maybeCompareCandidates()) { frontier_view_.cancel(); return FINAL_RESULT::EXPLORE; }
+  if (maybeCompareCandidates()) return FINAL_RESULT::EXPLORE;
 
   // Recompute the no-frontier pool before arrival checks as well: a changed
   // completed review must not inherit the old provisional goal's STOP.
@@ -469,7 +465,6 @@ int ExplorationFSM::callActionPlanner()
   // Reach the object - check if close enough to target object
   if (fd_->final_result_ == FINAL_RESULT::SEARCH_OBJECT &&
       (current_pos - expl_manager_->ed_->next_pos_).norm() < reach_distance) {
-    frontier_view_.cancel();
     if (maybeReviewStop()) return FINAL_RESULT::SEARCH_OBJECT;
     RCLCPP_ERROR(node_->get_logger(), "Reach the object successfully!!!");
     final_res = FINAL_RESULT::REACH_OBJECT;
@@ -576,7 +571,7 @@ int ExplorationFSM::callActionPlanner()
   expl_res = expl_manager_->planNextBestPoint(fd_->start_pt_, fd_->start_yaw_(0));
 
   if (review_choice_no_frontier_ && expl_manager_->no_frontier_choice_active_) {
-    if (maybeCompareCandidates(true)) { frontier_view_.cancel(); return FINAL_RESULT::EXPLORE; }
+    if (maybeCompareCandidates(true)) return FINAL_RESULT::EXPLORE;
     if (expl_manager_->ed_->selected_object_id_ != expl_manager_->no_frontier_preferred_)
       expl_res=expl_manager_->planNextBestPoint(fd_->start_pt_,fd_->start_yaw_(0));
   }
@@ -606,23 +601,14 @@ int ExplorationFSM::callActionPlanner()
   else
     final_res = FINAL_RESULT::SEARCH_OBJECT;
 
-  if (final_res != FINAL_RESULT::EXPLORE) frontier_view_.cancel();
-
   if (final_res == FINAL_RESULT::NO_FRONTIER || expl_manager_->ed_->next_best_path_.empty()) {
     RCLCPP_WARN(node_->get_logger(), "No (passable) frontier");
     return final_res;
   }
 
   if (review_enabled_ && maybeReviewSelected(expl_res)) {
-    frontier_view_.cancel();
     return FINAL_RESULT::SEARCH_OBJECT;
   }
-
-  // Bind the chosen exploration goal to its own boundary; execute the stored
-  // heading only on arrival while that boundary remains visible and unknown.
-  if (frontier_look_ && final_res == FINAL_RESULT::EXPLORE &&
-      maybeLookAtFrontier(current_pos, current_yaw))
-    return final_res;
 
   Eigen::Vector2d end_pos = expl_manager_->ed_->next_pos_;
   Eigen::Vector2d last_end_pos = fd_->last_next_pos_;
@@ -958,48 +944,6 @@ int ExplorationFSM::planInspection()
     }
   }
   return FINAL_RESULT::EXPLORE;
-}
-
-bool ExplorationFSM::maybeLookAtFrontier(const Vector2d& position, double yaw)
-{
-  auto map=expl_manager_->sdf_map_;
-  const double range=node_->get_parameter("perception_utils.max_dist").as_double();
-  const double resolution=map->getResolution();
-  if (!(range>0 && resolution>0)) return false;
-  auto cell=[map](const Vector2d& p) {
-    if (!map->isInMap(p) || map->getOccupancy(p)==SDFMap2D::OCCUPIED) return -1;
-    return map->getOccupancy(p)==SDFMap2D::UNKNOWN ? 1 : 0;
-  };
-  // Finish an already reached goal before binding a newly selected frontier.
-  // Object/review preemption has already cancelled it above.
-  int turn=frontier_view_.next(position,yaw,resolution,range,cell);
-  if (!turn) {
-    const auto& ed=*expl_manager_->ed_;
-    // The mapping is exact: getFrontiers exports cells and averages together.
-    // Never substitute the nearest unrelated cluster when the old one retires.
-    auto bind_cluster=[&](const vector<Vector2d>& averages,
-                          const vector<vector<Vector2d>>& clusters) {
-      for (size_t i=0;i<averages.size() && i<clusters.size();++i) {
-        if ((averages[i]-ed.next_pos_).norm()>1e-5) continue;
-        if (frontier_view_.bind(position,ed.next_pos_,clusters[i],resolution,range,cell))
-          RCLCPP_INFO(node_->get_logger(),
-              "[Frontier heading] step=%d goal=(%.3f,%.3f) yaw=%.6f width=%.6f normal=%d cells=%zu",
-              review_step_,ed.next_pos_.x(),ed.next_pos_.y(),frontier_view_.target().yaw,
-              frontier_view_.target().width,frontier_view_.target().normal,clusters[i].size());
-        return true;
-      }
-      return false;
-    };
-    if (!bind_cluster(ed.frontier_averages_,ed.frontiers_))
-      bind_cluster(ed.dormant_frontier_averages_,ed.dormant_frontiers_);
-    turn=frontier_view_.next(position,yaw,resolution,range,cell);
-  }
-  if (!turn) return false;
-  fd_->newest_action_=turn>0 ? ACTION::TURN_LEFT : ACTION::TURN_RIGHT;
-  RCLCPP_INFO(node_->get_logger(),"[Frontier look] step=%d action=%d goal=(%.3f,%.3f) yaw=%.6f target=%.6f",
-      review_step_,fd_->newest_action_,frontier_view_.goal().x(),frontier_view_.goal().y(),
-      yaw,frontier_view_.target().yaw);
-  return true;
 }
 
 int ExplorationFSM::planNextBestAction(

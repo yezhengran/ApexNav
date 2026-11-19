@@ -240,8 +240,6 @@ def main():
     parser.add_argument("--episode-index", type=int, default=-1,
                         help="Zero-based dataset index for a single diagnostic episode")
     parser.add_argument("--step-sync", action="store_true", help="Apply each observation atomically before planning (new isolated runs)")
-    parser.add_argument("--frontier-look", action=argparse.BooleanOptionalAction, default=False,
-                        help="Bind exploration goal heading to its boundary; turn on arrival (default off)")
     parser.add_argument('--crop-pose-fallback', action='store_true',
                         help='linked_choice: one fallback arc at best-crop capture radius (default off)')
     parser.add_argument('--choice-no-frontier', action='store_true',
@@ -386,12 +384,6 @@ def main():
                 'other_targets': 'unchanged_structured_decision_and_quality'}
     if args.step_sync:
         spec["navigation_step_sync"] = True
-    if args.frontier_look:
-        spec['frontier_look'] = {'policy': 'goal_bound_widest_visible_boundary_v2',
-            'heading_assignment': 'after_goal_selection; revalidate_on_arrival',
-            'degenerate_heading': 'free_to_unknown_normal',
-            'max_turns': 6, 'arrival_m': .5, 'rescan_separation_m': .75,
-            'base_frontier_generation_and_routes': 'unchanged'}
     if args.review_profile in ('linked_annular', 'linked_choice'):
         spec['annular_review'] = {
             'candidate_memory': 'strict_top5_detector_score_per_mapper_id',
@@ -414,7 +406,7 @@ def main():
             'images': 'one_best_per_mapper_id;groups_up_to5_then_winners',
             'answer': 'must_choose_one_relative_preference_not_confirmation',
             'cache': 'phase_candidate_ids_and_completed_individual_reviews',
-            'navigation': 'original_approach_and_STOP;frontier_look_independent'}
+            'navigation': 'original_approach_and_STOP'}
     if args.crop_pose_fallback:
         command.append('+active_view.crop_pose_fallback=true')
         spec['crop_pose_fallback'] = {
@@ -534,7 +526,6 @@ def main():
                              f"review_stop:={str(args.review_profile in ('linked_stop', 'linked_stop_preserve')).lower()}",
                              f"review_preserve_stop:={str(args.review_profile == 'linked_stop_preserve').lower()}",
                              f"step_sync:={str(args.step_sync).lower()}",
-                             *(['frontier_look:=true'] if args.frontier_look else []),
                              *(['review_automatic:=true'] if args.review_profile in ('linked_early', 'linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
                              *(['review_fused:=true'] if args.review_profile in ('linked_fused', 'linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),
                              *(['review_confidence:=true'] if args.review_profile in ('linked_confidence', 'linked_framing', 'linked_annular', 'linked_choice') else []),

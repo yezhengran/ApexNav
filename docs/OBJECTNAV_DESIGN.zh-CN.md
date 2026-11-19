@@ -2,7 +2,7 @@
 
 本文件是后续开发的主设计索引。2026-11-18用户选定 **Q8-C2-semantic-v2** 为当前最终基准；实际实现由`linked_choice`、`semantic_guard_v2`、`image_order_v1`及三个C2开关组合。默认baseline行为仍保留，不能仅凭运行当前HEAD就认为启用了最终方法。
 
-最终成绩为新三类385/487，保留其他513后混合772/1000（77.20%）。结果来源、局限和配对变化见[实验总结](EXPERIMENT_SUMMARY.zh-CN.md)。历史运行HEAD为`237e292a52c9b41d9a10dfcafa836a2001a84457`；本次整理只调整测试和文档，不改变导航算法，不重跑实验。
+最终成绩为新三类385/487，保留其他513后混合772/1000（77.20%）。结果来源、局限和配对变化见[实验总结](EXPERIMENT_SUMMARY.zh-CN.md)。历史运行HEAD为`237e292a52c9b41d9a10dfcafa836a2001a84457`；历史结构整理只调整测试和文档。2026-11-19按用户要求删除可选前沿到点定向模块，保留semantic-v2原有前沿选择、路径规划和对象观测；不重跑或改写已验收结果。
 
 ## 1. 我们的改进与原项目的边界
 
@@ -148,7 +148,7 @@ Habitat目标真值只用于评测指标与离线检查，不进入在线Qwen请
 | 同步 / seed / 步数 | `step_sync=true` / 100 / 500 |
 | 观测阶段边界 | `uncertain_after_steps=400` |
 | C2开关 | crop-pose-fallback、crop-pose-single-view、choice-no-frontier均开 |
-| frontier-look | 关闭 |
+| 前沿探索 | 原前沿选择与路径规划；额外到点定向模块已移除 |
 | 视频 | 只保留完整失败 |
 
 默认CLI仍是baseline/legacy，属于兼容能力；维护时使用显式profile，不直接改变默认值来暗中“升级”旧实验。
@@ -161,10 +161,12 @@ Habitat目标真值只用于评测指标与离线检查，不进入在线Qwen请
   --method selected_review --review-backend qwen --review-profile linked_choice \
   --step-sync --uncertain-after-steps 400 \
   --qwen-prompt-policy semantic_guard_v2 --qwen-choice-id-policy image_order_v1 \
-  --crop-pose-fallback --crop-pose-single-view --choice-no-frontier --no-frontier-look \
+  --crop-pose-fallback --crop-pose-single-view --choice-no-frontier \
   --qwen-budget-ledger experiment_notes/qwen-paired50-20261110/budget.json \
   --failure-videos --dry-run
 ```
+
+2026-11-19移除方向模块后的完整六包构建为`outputs/build/semantic-v2-final-20261119/install/`，真实ROS集成验证使用此构建；后续新实验应显式source该目录的`setup.bash`，不能把旧含模块二进制作为新源码验收。历史构建保留用于来源复现。
 
 新实验必须另定身份集合、独立输出与预算授权；不能移除dry-run后把单例当完整487重测。既有账本不能重置，key只在`config/vlm.env`，不能输出或提交。
 
@@ -204,9 +206,9 @@ ApexNav/
 └── outputs/                 本地构建、运行输出、图片与失败视频
 ```
 
-第三方依赖、模型权重、数据集及既有构建按环境实际位置保留。本次将31个分散测试文件整理为24个，合并Qwen响应、提示词、离线审计、规划器启动与观测几何的同类测试；208个显式Python测试方法保留，移除旧位置和重复加载。具体入口与覆盖见[测试说明](../tests/README.md)。历史报告内的旧测试路径保持原始记录，查看旧提交/快照可恢复对应结构。
+第三方依赖、模型权重、数据集及既有构建按环境实际位置保留。2026-11-18将31个分散测试文件整理为24个，合并Qwen响应、提示词、离线审计、规划器启动与观测几何的同类测试；当时保留208个显式Python测试方法，移除旧位置和重复加载。具体入口与覆盖见[测试说明](../tests/README.md)。历史报告内的旧测试路径保持原始记录，查看旧提交/快照可恢复对应结构。
 
-不移动原始实验结果或删除事故/partial现场，不在收尾时重构运行状态机。原模块和旧profile留作复现与消融基础；这次结构精简聚焦测试目录与文档导航。
+semantic-v2及其依赖的原始结果、事故/partial现场保留；用户明确要求删除的方向开启100例专用记录另作清理。原模块和旧profile留作复现与消融基础；这次结构精简聚焦测试目录与文档导航。
 
 ## 7. 后续如何增加、替换或关闭模块
 
